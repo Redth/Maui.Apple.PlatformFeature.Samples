@@ -1,0 +1,62 @@
+{
+  "skill_name": "maui-ios-widget",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I have an existing .NET MAUI app called 'FitnessTracker' (bundle id com.fitcorp.fitnesstracker). I want to add an iOS widget that shows the user's daily step count and a motivational message. The widget should be interactive — I want a 'Refresh' button that re-reads the latest data. When I tap the widget, it should open the app to the stats page. Can you add the widget to my project?",
+      "expected_output": "Creates all C# service files (WidgetData customized with StepCount and MotivationalMessage properties, WidgetConstants with the correct identifiers, IWidgetDataService, StubWidgetDataService, iOS WidgetDataService), creates entitlements with group.com.fitcorp.fitnesstracker, updates Info.plist with URL scheme, updates AppDelegate for deep links, updates MauiProgram for DI, creates all Swift widget files (Settings, WidgetData matching C# model, SharedStorage, Provider, SwiftUI view showing step count and message with a Refresh button, Widget and WidgetBundle, a RefreshIntent AppIntent, ConfigurationAppIntent), creates entitlements for the widget, Info.plist for the extension, build-release.sh, and updates the .csproj with all widget-embedding configuration. All identifiers derived from com.fitcorp.fitnesstracker.",
+      "files": [],
+      "expectations": [
+        "A WidgetData.cs file exists with StepCount or similar fitness-specific properties",
+        "A WidgetConstants.cs file exists with GroupId set to group.com.fitcorp.fitnesstracker",
+        "An IWidgetDataService.cs interface file exists with SendDataToWidget and ReadDataFromWidget methods",
+        "A Platforms/iOS/WidgetDataService.cs file exists that uses NSUserDefaults with the App Group suite",
+        "Entitlements.plist files exist for both the app and widget extension with the same App Group ID",
+        "Info.plist has CFBundleURLTypes registered for the custom URL scheme",
+        "AppDelegate.cs overrides OpenUrl to handle the custom URL scheme",
+        "MauiProgram.cs registers IWidgetDataService via DI with #if IOS conditional",
+        "The .csproj contains AdditionalAppExtensions and WidgetKit.WidgetCenterProxy PackageReference",
+        "Swift Settings.swift exists with groupId matching the C# WidgetConstants.GroupId",
+        "Swift WidgetData.swift exists as a Codable struct with properties matching the C# WidgetData",
+        "Swift SharedStorage.swift exists with methods to read/write JSON via UserDefaults",
+        "Swift Provider.swift exists implementing AppIntentTimelineProvider",
+        "Swift view file exists showing step count data",
+        "At least one AppIntent Swift file exists for the refresh/interactive button",
+        "A build-release.sh script exists that calls xcodebuild for iphoneos and iphonesimulator",
+        "Instructions are provided for creating the Xcode project since .xcodeproj cannot be generated programmatically"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "I want to create a brand new .NET MAUI app from scratch that includes an iOS widget. The app is a simple todo list — the widget should show how many incomplete tasks there are and the title of the most recent task. The widget doesn't need to be interactive (no buttons), just display-only. When tapped it should open the app. Keep it simple.",
+      "expected_output": "Scaffolds a new MAUI project, creates all service layer files with a WidgetData model customized for todo data (IncompleteCount, LatestTaskTitle), creates all configuration files (entitlements, Info.plist URL scheme, .csproj widget embedding), creates all Swift files for a display-only widget (no AppIntent buttons, just widgetURL for tap-to-open), creates build script. Since it's display-only, the widget view should be simpler with no Button(intent:) elements and can support .systemSmall size.",
+      "files": [],
+      "expectations": [
+        "A new MAUI project is created or scaffolded",
+        "WidgetData.cs has properties relevant to a todo list (task count, task title, or similar)",
+        "All entitlements files have matching App Group IDs",
+        "The Swift widget view does NOT contain Button(intent:) since it's display-only",
+        "The Swift widget supports .systemSmall in supportedFamilies since no interactive buttons are needed",
+        "A widgetURL is set on the view for tap-to-open functionality",
+        "The .csproj has all iOS widget embedding configuration",
+        "SharedStorage.swift reads data from the app's UserDefaults key"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "My MAUI app uses the bundle id com.weatherapp.ios and I need to add a weather widget that shows current temperature, weather condition (sunny/cloudy/rainy), and location name. The widget should have a button to force-refresh the weather data. I also want it to work as a medium and large widget with different layouts for each size. The large version should show a 3-day forecast.",
+      "expected_output": "Creates all C# and Swift files with a WidgetData model customized for weather (Temperature, Condition, LocationName, and a ForecastDays collection in Extras or as a JSON-encoded field). The Swift view uses WidgetFamily environment variable to show different layouts for medium vs large. The large view includes a forecast section. Creates a ForceRefreshIntent AppIntent. All identifiers derived from com.weatherapp.ios.",
+      "files": [],
+      "expectations": [
+        "WidgetData.cs has weather-specific properties (temperature, condition, location)",
+        "WidgetConstants.cs has GroupId derived from com.weatherapp.ios (group.com.weatherapp.ios)",
+        "The Swift WidgetData.swift has matching Codable properties for weather data",
+        "The Swift widget view handles different layouts using @Environment or WidgetFamily",
+        "The supportedFamilies includes both .systemMedium and .systemLarge",
+        "At least one AppIntent exists for force-refreshing weather data",
+        "The .csproj has AdditionalAppExtensions configured correctly",
+        "Entitlements files use group.com.weatherapp.ios as the App Group ID"
+      ]
+    }
+  ]
+}

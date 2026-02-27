@@ -1,0 +1,45 @@
+name: XCodeWidget
+options:
+  bundleIdPrefix: com.mauiapplewidgets
+  deploymentTarget:
+    iOS: "17.0"
+  xcodeVersion: "16.0"
+
+settings:
+  base:
+    DEVELOPMENT_TEAM: ""
+
+targets:
+  XCodeWidget:
+    type: application
+    platform: iOS
+    sources:
+      - path: XCodeWidget
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mauiapplewidgets.app
+        INFOPLIST_GENERATION_MODE: GeneratedFile
+        CODE_SIGN_IDENTITY: "Apple Development"
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_VERSION: "5.9"
+    dependencies:
+      - target: SimpleWidgetExtension
+
+  SimpleWidgetExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: SimpleWidgetExtension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.companyname.mauiapplewidgets.SimpleWidgetExtension
+        INFOPLIST_FILE: SimpleWidgetExtension/Info.plist
+        CODE_SIGN_IDENTITY: "Apple Development"
+        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_ENTITLEMENTS: SimpleWidgetExtension.entitlements
+        SWIFT_VERSION: "5.9"
+        GENERATE_INFOPLIST_FILE: false
+        ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
+        ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME: WidgetBackground
+    entitlements:
+      path: SimpleWidgetExtension.entitlements

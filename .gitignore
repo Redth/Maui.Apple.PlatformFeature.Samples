@@ -1,0 +1,41 @@
+# Build artifacts
+bin/
+obj/
+build/
+XReleases/
+
+# .NET
+*.user
+*.suo
+*.userprefs
+TestResults/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.sln.DotSettings.user
+
+# macOS
+.DS_Store
+Thumbs.db
+
+# Xcode
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+XCBuildData/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/
+
+# Xcode build output (widget extensions, release builds)
+*.appex
+*.dSYM
+XReleases/
+WidgetExtensions/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Packages/
+Package.resolved

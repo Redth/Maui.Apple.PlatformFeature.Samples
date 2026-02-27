@@ -1,0 +1,61 @@
+{
+  "skill_name": "maui-ios-appintents",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "I have an existing .NET MAUI recipe app with a RecipeService that has methods like GetAll(), GetById(string id), Search(string query), and CreateRecipe(string name, RecipeDifficulty difficulty, int prepMinutes, string? notes). The app has RecipeDifficulty enum (Easy, Medium, Hard, Expert) and MealType enum (Breakfast, Lunch, Dinner, Snack, Dessert). I want to add Siri support so users can say things like 'Find a recipe in MyRecipes' or 'Add a new recipe in MyRecipes'. Set up the complete App Intents integration with the Swift framework, binding library, and bridge. My project is at src/MyRecipes/ and targets net10.0-ios.",
+      "expected_output": "Complete Swift framework with AppEnums for RecipeDifficulty and MealType, AppEntity for RecipeEntity, EntityStringQuery, at least 3 AppIntents (Create, Search, Open), AppShortcutsProvider with Siri phrases, @objc bridge with BridgeRecipeItem DTO and RecipeDataProvider protocol. Binding library with correct ApiDefinition.cs. C# bridge provider delegating to RecipeService. AppDelegate wiring. MSBuild metadata copy target. Makefile and build script.",
+      "files": [],
+      "expectations": [
+        "Swift Package.swift exists with dynamic library product targeting iOS 17+",
+        "BridgeRecipeItem class has @objc(BridgeRecipeItem) annotation",
+        "RecipeDataProvider protocol has @objc annotation",
+        "At least one AppEnum is defined (RecipeDifficulty)",
+        "RecipeEntity conforms to AppEntity with displayRepresentation",
+        "EntityStringQuery has entities(for:), entities(matching:), and suggestedEntities()",
+        "At least 3 AppIntents are defined with perform() methods",
+        "AppShortcutsProvider has phrases containing \\(.applicationName)",
+        "ApiDefinition.cs maps all @objc bridge types",
+        "C# bridge provider class inherits from the protocol model class",
+        "AppDelegate wires bridge in FinishedLaunching",
+        "MSBuild CopyAppIntentsMetadata target exists in .csproj",
+        "build-xcframework.sh includes BUILD_LIBRARY_FOR_DISTRIBUTION=YES and SWIFT_REFLECTION_METADATA_LEVEL=all",
+        "IntentError enum exists with CustomLocalizedStringResourceConvertible conformance"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "I'm starting a brand new .NET MAUI app for tracking workouts. I want it to have Siri integration from the start. The app should track workouts with fields: name (string), type (enum: Cardio, Strength, Flexibility, HIIT, Sports), duration in minutes (int), calories burned (int, optional), date (DateTime), and notes (string, optional). I want Siri to be able to: log a new workout, list today's workouts, search for past workouts, and get workout stats. Please create the complete project structure including the MAUI app, Swift framework, and binding library. Target net10.0-ios, project name FitTracker.",
+      "expected_output": "Complete new MAUI project with models, services, ViewModels, basic UI. Complete Swift framework with WorkoutType AppEnum, WorkoutEntity, at least 4 intents (LogWorkout, ListToday, SearchWorkouts, GetStats), AppShortcutsProvider. Binding library. Bridge implementation. Full build pipeline.",
+      "files": [],
+      "expectations": [
+        "MAUI project with WorkoutItem model class exists",
+        "IWorkoutService interface with CRUD + query methods exists",
+        "WorkoutService implementation exists",
+        "Swift WorkoutType AppEnum has all 5 cases with matching raw Int values",
+        "WorkoutEntity has @Property annotations for all relevant fields",
+        "At least 4 AppIntents are implemented",
+        "Bridge DTO uses sentinel values for optional ints (e.g. -1 for nil calories)",
+        "build-xcframework.sh exists and is executable",
+        "Binding .csproj has NativeReference with ForceLoad=true and SmartLink=false",
+        "Makefile or similar build orchestration exists",
+        "Entitlements.plist includes com.apple.developer.siri"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "I have a .NET MAUI notes app and I just want to add a single Siri shortcut that lets users create a new note by voice. The note model has Title (string) and Content (string). My service is called INotesService with a CreateNote(string title, string content) method. Keep it minimal — I don't need entities or enums, just the simplest possible intent. Project is at src/QuickNotes/.",
+      "expected_output": "Minimal Swift framework with just a CreateNoteIntent (no entity, no enum), minimal bridge with protocol having just createNote method, binding library, C# bridge, AppDelegate wiring. Should be the simplest possible working example.",
+      "files": [],
+      "expectations": [
+        "Swift intent takes just two String parameters (title and content)",
+        "No AppEnum or AppEntity types (minimal setup as requested)",
+        "Bridge protocol has just the createNote method",
+        "AppShortcutsProvider exists with at least one phrase",
+        "The implementation is notably simpler/smaller than a full entity-based setup",
+        "All @objc annotations are present on bridge classes",
+        "MSBuild metadata copy target is included"
+      ]
+    }
+  ]
+}

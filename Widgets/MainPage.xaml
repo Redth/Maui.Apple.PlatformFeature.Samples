@@ -1,0 +1,59 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:local="clr-namespace:MauiAppleWidgets"
+             x:Class="MauiAppleWidgets.MainPage"
+             x:DataType="local:MainPage">
+
+    <ScrollView>
+        <VerticalStackLayout
+            Padding="30,0"
+            Spacing="25">
+            <Image
+                Source="dotnet_bot.png"
+                HeightRequest="185"
+                Aspect="AspectFit"
+                SemanticProperties.Description="dot net bot in a submarine number ten" />
+
+            <Label
+                Text="MAUI + iOS Widget"
+                Style="{StaticResource Headline}"
+                SemanticProperties.HeadingLevel="Level1" />
+
+            <Label
+                Text="Counter syncs between the app and widget"
+                Style="{StaticResource SubHeadline}"
+                SemanticProperties.HeadingLevel="Level2" />
+
+            <Label Text="{Binding Counter}"
+                   FontSize="64"
+                   FontAttributes="Bold"
+                   HorizontalTextAlignment="Center"
+                   HorizontalOptions="Center" />
+
+            <Grid ColumnDefinitions="*,*"
+                  ColumnSpacing="8">
+                <Button
+                    Text="-"
+                    FontSize="40"
+                    Grid.Column="0"
+                    Clicked="OnSubtractClicked"
+                    HorizontalOptions="Fill" />
+                <Button
+                    Text="+"
+                    FontSize="40"
+                    Grid.Column="1"
+                    Clicked="OnAddClicked"
+                    HorizontalOptions="Fill" />
+            </Grid>
+
+            <Label Text="{Binding StatusMessage}"
+                   FontSize="14"
+                   TextColor="Gray"
+                   HorizontalTextAlignment="Center"
+                   HorizontalOptions="Center" />
+
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>

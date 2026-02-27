@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-ios</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>true</ImplicitUsings>
+    <IsBindingProject>true</IsBindingProject>
+    <IsTrimmable>true</IsTrimmable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ObjcBindingApiDefinition Include="ApiDefinition.cs" />
+    <ObjcBindingCoreSource Include="StructsAndEnums.cs" />
+  </ItemGroup>
+
+  <!-- Build the Xcode project automatically via Native Library Interop -->
+  <ItemGroup>
+    <XcodeProject Include="..\MauiAppIntentsSample.AppIntents\MauiAppIntentsSampleIntents.xcodeproj">
+      <SchemeName>MauiAppIntentsSampleIntents</SchemeName>
+      <ForceLoad>true</ForceLoad>
+      <SmartLink>false</SmartLink>
+    </XcodeProject>
+  </ItemGroup>
+
+  <!-- Extract App Intents Metadata from the xcarchive after the Xcode project builds -->
+  <Target Name="ExtractAppIntentsMetadata" AfterTargets="_BuildXcodeProjects">
+    <PropertyGroup>
+      <_MetadataOutputDir>$(IntermediateOutputPath)xcode/Metadata.appintents</_MetadataOutputDir>
+      <_XcodeOutputDir>$(IntermediateOutputPath)xcode</_XcodeOutputDir>
+    </PropertyGroup>
+    <Exec Command="rm -rf &quot;$(_MetadataOutputDir)&quot;" Condition="Exists('$(_MetadataOutputDir)')" />
+    <Exec Command="METADATA_SRC=%24(find &quot;$(_XcodeOutputDir)&quot; -path &apos;*/archives/*Metadata.appintents&apos; -type d | head -1) &amp;&amp; if [ -n &quot;%24METADATA_SRC&quot; ]; then cp -R &quot;%24METADATA_SRC&quot; &quot;$(_MetadataOutputDir)&quot; &amp;&amp; echo &quot;Copied Metadata.appintents&quot;; else echo &quot;WARNING: Metadata.appintents not found&quot;; fi" />
+  </Target>
+</Project>
