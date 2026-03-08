@@ -261,14 +261,7 @@ Without `com.apple.developer.siri` in `Entitlements.plist`, **Siri will not invo
 ### 11. Provisioning Profile Must Include Siri Capability
 **Wildcard provisioning profiles do not include the Siri capability.** You need a dedicated (non-wildcard) provisioning profile for your specific bundle ID with Siri enabled. Without it, the app will build, deploy, and code-sign successfully, but Siri still won't see your intents.
 
-Create one via App Store Connect, Xcode automatic signing, or the CLI:
-```
-maui-sherpa apple profiles create \
-  --name "MyApp Development" \
-  --type IOS_APP_DEVELOPMENT \
-  --bundle-id com.company.myapp \
-  --all-devices --install
-```
+To fix this, create a dedicated provisioning profile for your bundle ID with Siri enabled. You can do this through the Apple Developer Portal, Xcode automatic signing (recommended), or provisioning tooling such as Maui.Sherpa.
 **Symptom**: Everything builds and deploys without errors, intents work in Shortcuts, but Siri voice activation fails — identical to a missing entitlement, but the entitlement is present.
 
 ---
