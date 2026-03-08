@@ -250,6 +250,20 @@ The MSBuild property `$(AppBundleDir)` may or may not end with a trailing `/`. A
 ### 9. Intent Donation is Fire-and-Forget
 Intent donation (`IntentDonationManager.shared.donate`) is async and can fail silently. Wrap donation calls in try/catch and log failures, but never let them crash the app. The donation is a hint to the system, not a critical operation. Also: **only donate when the user acts in your app's UI** — Siri/Shortcuts donations are handled automatically by the system.
 
+### 10. Siri Entitlement Required for Voice Activation
+Without `com.apple.developer.siri` in `Entitlements.plist`, **Siri will not invoke your intents** — even though they work perfectly in the Shortcuts app. This is the most common "intents work in Shortcuts but not Siri" issue. Ensure your `Entitlements.plist` includes:
+```xml
+<key>com.apple.developer.siri</key>
+<true/>
+```
+**Symptom**: Intents appear and execute correctly in the Shortcuts app, but Siri voice activation silently fails — no error, no response, Siri acts as if the intent doesn't exist.
+
+### 11. Provisioning Profile Must Include Siri Capability
+**Wildcard provisioning profiles do not include the Siri capability.** You need a dedicated (non-wildcard) provisioning profile for your specific bundle ID with Siri enabled. Without it, the app will build, deploy, and code-sign successfully, but Siri still won't see your intents.
+
+To fix this, create a dedicated provisioning profile for your bundle ID with Siri enabled. You can do this through the Apple Developer Portal, Xcode automatic signing (recommended), or provisioning tooling such as Maui.Sherpa.
+**Symptom**: Everything builds and deploys without errors, intents work in Shortcuts, but Siri voice activation fails — identical to a missing entitlement, but the entitlement is present.
+
 ---
 
 ## Reference Files
