@@ -8,7 +8,7 @@ The intended flow is:
 2. MSBuild scans the attributed C# during iOS builds when `MauiAppIntentsEnabled=true`.
 3. MSBuild emits app-specific Swift declarations, a reusable Swift JSON bridge, and C# native interop glue under `obj/`.
 4. `xcodebuild` archives a fresh SwiftPM package directly from `Package.swift`; no checked-in `.xcodeproj` is needed.
-5. The generated xcframework is added as a `NativeReference`, and `Metadata.appintents` is copied into the app bundle.
+5. The generated xcframework is added as a `NativeReference`, `Metadata.appintents` is copied into the app bundle, and the final bundle is validated before codesigning.
 
 The reusable part is the C# API, generated dispatcher, native bridge glue, and Swift runtime JSON bridge. The per-app generated Swift stays intentionally small: only the `AppIntent`, `AppEntity`, `AppEnum`, `EntityQuery`, and `AppShortcutsProvider` declarations Apple needs to extract metadata.
 
@@ -76,7 +76,16 @@ Maui.AppIntents.MauiAppIntentsNative.WireUp(IPlatformApplication.Current!.Servic
 #endif
 ```
 
-`MauiAppIntentsArchivePlatforms` can be set to `Simulator`, `Device`, or `Both`. By default, simulator RIDs build only simulator archives, device RIDs build only device archives, and RID-less builds archive both.
+`MauiAppIntentsArchivePlatforms` can be set to `Simulator`, `Device`, or `Both`. By default, simulator RIDs build only simulator archives, device RIDs build only device archives, and RID-less builds archive both. `MauiAppIntentsValidateBundle` defaults to `true`; set it to `false` only when diagnosing the build pipeline.
+
+## Build validation
+
+The package injects into the iOS build graph through MSBuild dependency properties instead of fragile `BeforeTargets`/`AfterTargets` hooks. The generated SwiftPM archive runs only when its generated Swift, runtime shim, package manifest, or build script inputs change. After the SDK has assembled the `.app` bundle and before codesigning, the validation gate checks:
+
+- `Metadata.appintents/extract.actionsdata` and `version.json` are present in the app bundle.
+- The generated embedded framework is present in `Frameworks/`.
+- The framework exports the stable `MauiAppIntentBridgeSetDispatcher` C ABI symbol.
+- `extract.actionsdata` contains the generated intent identifiers and shortcut phrases from the normalized generator manifest.
 
 ## Simulator validation
 
@@ -95,5 +104,6 @@ The current vertical slice has been validated with the sample app on an iPhone 1
 - Generated `AppShortcutsProvider` from `[AppShortcut]`.
 - Generated C# registration and native bridge glue.
 - Generated SwiftPM package + `xcodebuild archive` + xcframework + `Metadata.appintents`.
+- Automated bundle validation for generated metadata, shortcut phrases, embedded framework, and bridge symbol.
 
 Entities, enums, rich result values, and `ParameterSummary` generation are the next layer; the build/bridge path is intentionally structured so those declarations can be added without reintroducing app-authored Swift or a checked-in Xcode project.

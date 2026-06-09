@@ -11,7 +11,19 @@
     <_MauiAppIntentsGeneratedSwift>$(_MauiAppIntentsPackageDir)Sources/$(MauiAppIntentsModuleName)/Generated/AppIntents.generated.swift</_MauiAppIntentsGeneratedSwift>
     <_MauiAppIntentsGeneratedRegistration>$(MauiAppIntentsBuildRoot)managed/MauiAppIntentGeneratedRegistration.g.cs</_MauiAppIntentsGeneratedRegistration>
     <_MauiAppIntentsGeneratedNativeBinding>$(MauiAppIntentsBuildRoot)managed/MauiAppIntentNativeBridge.g.cs</_MauiAppIntentsGeneratedNativeBinding>
+    <_MauiAppIntentsValidationManifest>$(MauiAppIntentsBuildRoot)validation/MauiAppIntentValidationManifest.txt</_MauiAppIntentsValidationManifest>
+    <_MauiAppIntentsValidationStamp>$(MauiAppIntentsBuildRoot)validation/bundle-validation.stamp</_MauiAppIntentsValidationStamp>
+    <MaciOSPrepareForBuildDependsOn Condition="'$(_MauiAppIntentsShouldBuild)' == 'true'">$(MaciOSPrepareForBuildDependsOn);_ConfigureMauiAppIntentsBuildGraph</MaciOSPrepareForBuildDependsOn>
   </PropertyGroup>
+
+  <Target Name="_ConfigureMauiAppIntentsBuildGraph"
+          Condition="'$(_MauiAppIntentsShouldBuild)' == 'true'">
+    <PropertyGroup>
+      <CoreCompileDependsOn>_GenerateMauiAppIntentsFiles;$(CoreCompileDependsOn)</CoreCompileDependsOn>
+      <_ComputeFrameworkFilesToPublishDependsOn>_RegisterMauiAppIntentsNativeReference;$(_ComputeFrameworkFilesToPublishDependsOn)</_ComputeFrameworkFilesToPublishDependsOn>
+      <CreateAppBundleDependsOn>$(CreateAppBundleDependsOn);_CopyMauiAppIntentsMetadata;_ValidateMauiAppIntentsBundle</CreateAppBundleDependsOn>
+    </PropertyGroup>
+  </Target>
 
   <UsingTask TaskName="GenerateMauiAppIntentsFiles"
              TaskFactory="RoslynCodeTaskFactory"
@@ -21,6 +33,7 @@
       <OutputDirectory ParameterType="System.String" Required="true" />
       <ManagedOutputFile ParameterType="System.String" Required="true" />
       <NativeBindingOutputFile ParameterType="System.String" Required="true" />
+      <ValidationManifestOutputFile ParameterType="System.String" Required="true" />
       <ModuleName ParameterType="System.String" Required="true" />
       <MinimumOSVersion ParameterType="System.String" Required="true" />
       <ArchivePlatforms ParameterType="System.String" Required="true" />
@@ -47,6 +60,7 @@ public sealed class GenerateMauiAppIntentsFiles : Microsoft.Build.Utilities.Task
     public string OutputDirectory { get; set; }
     public string ManagedOutputFile { get; set; }
     public string NativeBindingOutputFile { get; set; }
+    public string ValidationManifestOutputFile { get; set; }
     public string ModuleName { get; set; }
     public string MinimumOSVersion { get; set; }
     public string ArchivePlatforms { get; set; }
@@ -99,12 +113,14 @@ public sealed class GenerateMauiAppIntentsFiles : Microsoft.Build.Utilities.Task
             Directory.CreateDirectory(OutputDirectory);
             Directory.CreateDirectory(Path.GetDirectoryName(ManagedOutputFile));
             Directory.CreateDirectory(Path.GetDirectoryName(NativeBindingOutputFile));
+            Directory.CreateDirectory(Path.GetDirectoryName(ValidationManifestOutputFile));
 
             WritePackage();
             WriteRuntimeSwift();
             WriteGeneratedSwift(intents);
             WriteManagedRegistration(intents);
             WriteNativeBinding();
+            WriteValidationManifest(intents);
             WriteBuildScript();
 
             Log.LogMessage(Microsoft.Build.Framework.MessageImportance.High, "Generated {0} MAUI App Intent declaration(s).", intents.Count);
@@ -451,6 +467,24 @@ public enum MauiAppIntentRuntimeError: Error, CustomLocalizedStringResourceConve
         File.WriteAllText(ManagedOutputFile, sb.ToString());
     }
 
+    private void WriteValidationManifest(List<Intent> intents)
+    {
+        var sb = new StringBuilder();
+        foreach (var intent in intents)
+        {
+            sb.AppendLine("intent\t" + SanitizeIdentifier(intent.Identifier));
+            foreach (var shortcut in intent.Shortcuts)
+            {
+                if (!string.IsNullOrWhiteSpace(shortcut.Phrase))
+                {
+                    sb.AppendLine("shortcut\t" + shortcut.Phrase);
+                }
+            }
+        }
+
+        File.WriteAllText(ValidationManifestOutputFile, sb.ToString());
+    }
+
     private void WriteBuildScript()
     {
         var scriptPath = Path.Combine(OutputDirectory, "build-appintents.sh");
@@ -459,10 +493,15 @@ set -euo pipefail
 
 SCRIPT_PATH=""${BASH_SOURCE[0]}""
 SCRIPT_DIR=""${SCRIPT_PATH%/*}""
+CALLER_DIR=`pwd`
 PACKAGE_DIR=`cd ""$SCRIPT_DIR"" && pwd`
 SCHEME=""" + EscapeBash(ModuleName) + @"""
 CONFIGURATION=""${CONFIGURATION:-Debug}""
 BUILD_DIR=""${BUILD_DIR:-$PACKAGE_DIR/../native}""
+case ""$BUILD_DIR"" in
+  /*) ;;
+  *) BUILD_DIR=""$CALLER_DIR/$BUILD_DIR"" ;;
+esac
 ARCHIVE_PLATFORMS=""${ARCHIVE_PLATFORMS:-" + EscapeBash(ArchivePlatforms) + @"}""
 
 rm -rf ""$BUILD_DIR""
@@ -768,6 +807,323 @@ public static class MauiAppIntentsNative
     </Task>
   </UsingTask>
 
+  <UsingTask TaskName="ValidateMauiAppIntentsBundle"
+             TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <AppBundleDir ParameterType="System.String" Required="true" />
+      <ModuleName ParameterType="System.String" Required="true" />
+      <ValidationManifest ParameterType="System.String" Required="true" />
+      <StampFile ParameterType="System.String" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System" />
+      <Using Namespace="System.Collections.Generic" />
+      <Using Namespace="System.Diagnostics" />
+      <Using Namespace="System.Globalization" />
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Linq" />
+      <Using Namespace="System.Text" />
+      <Code Type="Class" Language="cs"><![CDATA[
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Text;
+
+public sealed class ValidateMauiAppIntentsBundle : Microsoft.Build.Utilities.Task
+{
+    private const string BridgeSymbol = "_MauiAppIntentBridgeSetDispatcher";
+
+    public string AppBundleDir { get; set; }
+    public string ModuleName { get; set; }
+    public string ValidationManifest { get; set; }
+    public string StampFile { get; set; }
+
+    public override bool Execute()
+    {
+        try
+        {
+            var appBundleDir = AppBundleDir ?? "";
+            var metadataDir = Path.Combine(appBundleDir, "Metadata.appintents");
+            var actionsData = Path.Combine(metadataDir, "extract.actionsdata");
+            var versionJson = Path.Combine(metadataDir, "version.json");
+            var frameworkBinary = Path.Combine(appBundleDir, "Frameworks", ModuleName + ".framework", ModuleName);
+
+            RequireFile(ValidationManifest, "Generated App Intents validation manifest is missing.");
+            if (Log.HasLoggedErrors)
+            {
+                return false;
+            }
+
+            var entries = ReadManifest().ToList();
+            if (entries.Count == 0)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(StampFile));
+                File.WriteAllText(StampFile, DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+                Log.LogMessage(Microsoft.Build.Framework.MessageImportance.Low, "No generated MAUI App Intents found to validate.");
+                return true;
+            }
+
+            RequireFile(actionsData, "Generated App Intents metadata is missing from the app bundle.");
+            RequireFile(versionJson, "Generated App Intents metadata version file is missing from the app bundle.");
+            RequireFile(frameworkBinary, "Generated App Intents framework is missing from the app bundle.");
+
+            if (Log.HasLoggedErrors)
+            {
+                return false;
+            }
+
+            ValidateActionsData(actionsData, entries);
+            ValidateBridgeSymbol(frameworkBinary);
+
+            if (!Log.HasLoggedErrors)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(StampFile));
+                File.WriteAllText(StampFile, DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+                Log.LogMessage(Microsoft.Build.Framework.MessageImportance.High, "Validated generated MAUI App Intents bundle outputs.");
+            }
+
+            return !Log.HasLoggedErrors;
+        }
+        catch (Exception ex)
+        {
+            Log.LogErrorFromException(ex, showStackTrace: true);
+            return false;
+        }
+    }
+
+    private void ValidateActionsData(string actionsData, IReadOnlyList<ManifestEntry> entries)
+    {
+        var text = File.ReadAllText(actionsData);
+        if (text.IndexOf('{') < 0)
+        {
+            Log.LogWarning("Generated App Intents metadata at '{0}' is not a recognizable JSON payload; skipping identifier and shortcut phrase validation.", actionsData);
+            return;
+        }
+
+        foreach (var entry in entries)
+        {
+            if (!ContainsJsonString(text, entry.Value))
+            {
+                Log.LogError("Generated App Intents metadata does not contain expected {0} '{1}'.", entry.Kind, entry.Value);
+            }
+        }
+    }
+
+    private IEnumerable<ManifestEntry> ReadManifest()
+    {
+        foreach (var line in File.ReadAllLines(ValidationManifest))
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            var separator = line.IndexOf('\t');
+            if (separator <= 0 || separator == line.Length - 1)
+            {
+                Log.LogWarning("Ignoring malformed generated App Intents validation manifest line: {0}", line);
+                continue;
+            }
+
+            yield return new ManifestEntry(line.Substring(0, separator), line.Substring(separator + 1));
+        }
+    }
+
+    private void ValidateBridgeSymbol(string frameworkBinary)
+    {
+        var architectures = GetArchitectures(frameworkBinary);
+        if (architectures.Count == 0)
+        {
+            if (NmContainsSymbol(frameworkBinary, null))
+            {
+                return;
+            }
+
+            Log.LogError("Generated App Intents framework '{0}' does not export '{1}'.", frameworkBinary, BridgeSymbol);
+            return;
+        }
+
+        foreach (var architecture in architectures)
+        {
+            if (NmContainsSymbol(frameworkBinary, architecture))
+            {
+                return;
+            }
+        }
+
+        Log.LogError("Generated App Intents framework '{0}' does not export '{1}' in any architecture slice ({2}).", frameworkBinary, BridgeSymbol, string.Join(", ", architectures));
+    }
+
+    private List<string> GetArchitectures(string frameworkBinary)
+    {
+        var result = Run("/usr/bin/lipo", "-archs " + Quote(frameworkBinary));
+        if (result.ExitCode != 0)
+        {
+            return new List<string>();
+        }
+
+        var output = (result.Output + " " + result.Error).Trim();
+        var marker = "are:";
+        var index = output.IndexOf(marker, StringComparison.Ordinal);
+        if (index >= 0)
+        {
+            return SplitArchitectures(output.Substring(index + marker.Length));
+        }
+
+        marker = "architecture:";
+        index = output.IndexOf(marker, StringComparison.Ordinal);
+        if (index >= 0)
+        {
+            return SplitArchitectures(output.Substring(index + marker.Length));
+        }
+
+        return SplitArchitectures(output);
+    }
+
+    private static List<string> SplitArchitectures(string value)
+    {
+        return (value ?? "")
+            .Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            .Where(v => v.IndexOf('/') < 0 && v.IndexOf(':') < 0)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private bool NmContainsSymbol(string frameworkBinary, string architecture)
+    {
+        var args = string.IsNullOrEmpty(architecture)
+            ? "-gU " + Quote(frameworkBinary)
+            : "-arch " + Quote(architecture) + " -gU " + Quote(frameworkBinary);
+        var result = Run("/usr/bin/nm", args);
+        return (result.Output + result.Error).IndexOf(BridgeSymbol, StringComparison.Ordinal) >= 0;
+    }
+
+    private ProcessResult Run(string fileName, string arguments)
+    {
+        var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = fileName,
+                Arguments = arguments,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            }
+        };
+
+        var output = new StringBuilder();
+        var error = new StringBuilder();
+        process.OutputDataReceived += (_, e) => { if (e.Data != null) output.AppendLine(e.Data); };
+        process.ErrorDataReceived += (_, e) => { if (e.Data != null) error.AppendLine(e.Data); };
+
+        process.Start();
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+        process.WaitForExit();
+
+        return new ProcessResult(process.ExitCode, output.ToString(), error.ToString());
+    }
+
+    private void RequireFile(string path, string message)
+    {
+        if (!File.Exists(path))
+        {
+            Log.LogError("{0} Expected file: {1}", message, path);
+        }
+    }
+
+    private static bool ContainsJsonString(string json, string value)
+    {
+        return json.IndexOf(ToJsonStringLiteral(value), StringComparison.Ordinal) >= 0 ||
+            json.IndexOf(value ?? "", StringComparison.Ordinal) >= 0;
+    }
+
+    private static string ToJsonStringLiteral(string value)
+    {
+        var sb = new StringBuilder();
+        sb.Append('"');
+        foreach (var ch in value ?? "")
+        {
+            switch (ch)
+            {
+                case '\\':
+                    sb.Append(@"\\");
+                    break;
+                case '"':
+                    sb.Append("\\\"");
+                    break;
+                case '\b':
+                    sb.Append(@"\b");
+                    break;
+                case '\f':
+                    sb.Append(@"\f");
+                    break;
+                case '\n':
+                    sb.Append(@"\n");
+                    break;
+                case '\r':
+                    sb.Append(@"\r");
+                    break;
+                case '\t':
+                    sb.Append(@"\t");
+                    break;
+                default:
+                    if (char.IsControl(ch))
+                    {
+                        sb.Append("\\u");
+                        sb.Append(((int)ch).ToString("x4", CultureInfo.InvariantCulture));
+                    }
+                    else
+                    {
+                        sb.Append(ch);
+                    }
+                    break;
+            }
+        }
+        sb.Append('"');
+        return sb.ToString();
+    }
+
+    private static string Quote(string value)
+    {
+        return "\"" + (value ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
+    }
+
+    private sealed class ManifestEntry
+    {
+        public ManifestEntry(string kind, string value)
+        {
+            Kind = kind;
+            Value = value;
+        }
+
+        public string Kind { get; }
+        public string Value { get; }
+    }
+
+    private sealed class ProcessResult
+    {
+        public ProcessResult(int exitCode, string output, string error)
+        {
+            ExitCode = exitCode;
+            Output = output;
+            Error = error;
+        }
+
+        public int ExitCode { get; }
+        public string Output { get; }
+        public string Error { get; }
+    }
+}
+]]></Code>
+    </Task>
+  </UsingTask>
+
   <ItemGroup Condition="'$(_MauiAppIntentsShouldBuild)' == 'true'">
     <_MauiAppIntentsCompileSource Include="@(Compile)" />
     <Compile Remove="$(_MauiAppIntentsGeneratedRegistration)" Condition="Exists('$(_MauiAppIntentsGeneratedRegistration)')" />
@@ -777,15 +1133,15 @@ public static class MauiAppIntentsNative
   </ItemGroup>
 
   <Target Name="_GenerateMauiAppIntentsFiles"
-          BeforeTargets="CoreCompile"
           Condition="'$(_MauiAppIntentsShouldBuild)' == 'true'"
-          Inputs="@(_MauiAppIntentsCompileSource);$(MSBuildProjectFullPath)"
-          Outputs="$(_MauiAppIntentsGeneratedSwift);$(_MauiAppIntentsGeneratedRegistration);$(_MauiAppIntentsGeneratedNativeBinding)">
+          Inputs="@(_MauiAppIntentsCompileSource);$(MSBuildProjectFullPath);$(MSBuildThisFileFullPath)"
+          Outputs="$(_MauiAppIntentsPackageDir)Package.swift;$(_MauiAppIntentsPackageDir)build-appintents.sh;$(_MauiAppIntentsPackageDir)Sources/$(MauiAppIntentsModuleName)/Runtime/MauiAppIntentsRuntime.swift;$(_MauiAppIntentsGeneratedSwift);$(_MauiAppIntentsGeneratedRegistration);$(_MauiAppIntentsGeneratedNativeBinding);$(_MauiAppIntentsValidationManifest)">
     <GenerateMauiAppIntentsFiles
       Sources="@(_MauiAppIntentsCompileSource)"
       OutputDirectory="$(_MauiAppIntentsPackageDir)"
       ManagedOutputFile="$(_MauiAppIntentsGeneratedRegistration)"
       NativeBindingOutputFile="$(_MauiAppIntentsGeneratedNativeBinding)"
+      ValidationManifestOutputFile="$(_MauiAppIntentsValidationManifest)"
       ModuleName="$(MauiAppIntentsModuleName)"
       MinimumOSVersion="$(MauiAppIntentsMinimumOSVersion)"
       ArchivePlatforms="$(MauiAppIntentsArchivePlatforms)">
@@ -801,17 +1157,18 @@ public static class MauiAppIntentsNative
 
   <Target Name="_BuildMauiAppIntentsNative"
           DependsOnTargets="_GenerateMauiAppIntentsFiles"
-          Condition="'$(_MauiAppIntentsShouldBuild)' == 'true' and Exists('$(_MauiAppIntentsGeneratedSwift)')"
-          Inputs="$(_MauiAppIntentsPackageDir)Package.swift;$(_MauiAppIntentsGeneratedSwift);$(_MauiAppIntentsPackageDir)Sources/$(MauiAppIntentsModuleName)/Runtime/MauiAppIntentsRuntime.swift"
-          Outputs="$(_MauiAppIntentsBuildStamp)">
+          Condition="'$(_MauiAppIntentsShouldBuild)' == 'true'"
+          Inputs="$(_MauiAppIntentsPackageDir)Package.swift;$(_MauiAppIntentsPackageDir)build-appintents.sh;$(_MauiAppIntentsGeneratedSwift);$(_MauiAppIntentsPackageDir)Sources/$(MauiAppIntentsModuleName)/Runtime/MauiAppIntentsRuntime.swift"
+          Outputs="$(_MauiAppIntentsBuildStamp);$(_MauiAppIntentsXcframework)/Info.plist;$(_MauiAppIntentsMetadataDir)/extract.actionsdata;$(_MauiAppIntentsMetadataDir)/version.json">
     <Exec Command="&quot;$(_MauiAppIntentsPackageDir)build-appintents.sh&quot;"
           EnvironmentVariables="CONFIGURATION=$(Configuration);BUILD_DIR=$(_MauiAppIntentsOutputDir);ARCHIVE_PLATFORMS=$(MauiAppIntentsArchivePlatforms)" />
   </Target>
 
   <Target Name="_RegisterMauiAppIntentsNativeReference"
-          BeforeTargets="_ExpandNativeReferences;ResolveNativeReferences"
           DependsOnTargets="_BuildMauiAppIntentsNative"
-          Condition="'$(_MauiAppIntentsShouldBuild)' == 'true' and Exists('$(_MauiAppIntentsXcframework)')">
+          Condition="'$(_MauiAppIntentsShouldBuild)' == 'true'">
+    <Error Text="Generated MAUI App Intents framework was not produced at '$(_MauiAppIntentsXcframework)'."
+           Condition="!Exists('$(_MauiAppIntentsXcframework)')" />
     <ItemGroup>
       <NativeReference Include="$(_MauiAppIntentsXcframework)"
                        Kind="Framework"
@@ -822,14 +1179,26 @@ public static class MauiAppIntentsNative
   </Target>
 
   <Target Name="_CopyMauiAppIntentsMetadata"
-          AfterTargets="_CopyResourcesToBundle"
-          Condition="'$(_MauiAppIntentsShouldBuild)' == 'true' and Exists('$(_MauiAppIntentsMetadataDir)')"
+          DependsOnTargets="_BuildMauiAppIntentsNative"
+          Condition="'$(_MauiAppIntentsShouldBuild)' == 'true'"
           Inputs="$(_MauiAppIntentsMetadataDir)/**/*"
-          Outputs="$(AppBundleDir)/Metadata.appintents/version.json">
+          Outputs="$(AppBundleDir)/Metadata.appintents/extract.actionsdata;$(AppBundleDir)/Metadata.appintents/version.json">
     <ItemGroup>
       <_MauiAppIntentsMetadata Include="$(_MauiAppIntentsMetadataDir)/**/*" />
     </ItemGroup>
     <Copy SourceFiles="@(_MauiAppIntentsMetadata)"
           DestinationFolder="$(AppBundleDir)/Metadata.appintents/%(RecursiveDir)" />
+  </Target>
+
+  <Target Name="_ValidateMauiAppIntentsBundle"
+          DependsOnTargets="_CopyDirectoriesToBundle;_CopyMauiAppIntentsMetadata"
+          Condition="'$(_MauiAppIntentsShouldBuild)' == 'true' and '$(MauiAppIntentsValidateBundle)' == 'true'"
+          Inputs="$(_MauiAppIntentsValidationManifest);$(AppBundleDir)/Metadata.appintents/extract.actionsdata;$(AppBundleDir)/Metadata.appintents/version.json;$(AppBundleDir)/Frameworks/$(MauiAppIntentsModuleName).framework/Info.plist"
+          Outputs="$(_MauiAppIntentsValidationStamp)">
+    <ValidateMauiAppIntentsBundle
+      AppBundleDir="$(AppBundleDir)"
+      ModuleName="$(MauiAppIntentsModuleName)"
+      ValidationManifest="$(_MauiAppIntentsValidationManifest)"
+      StampFile="$(_MauiAppIntentsValidationStamp)" />
   </Target>
 </Project>

@@ -206,16 +206,17 @@ Simulator validation has confirmed:
 - the generated SwiftPM framework is embedded under `Frameworks/`
 - `Metadata.appintents/extract.actionsdata` contains `CreateGeneratedTaskIntent`
 - the generated C ABI bridge symbol is exported from the framework
+- the generated bundle validation target passes before codesigning
 - startup logs include `[AppIntents] Generated bridge wired up successfully.`
 - iOS indexes the generated shortcut phrase as `Create a generated task in TaskTracker`
 
 ### How the Build Works
 
-1. `dotnet build` triggers the MAUI project, which depends on the binding project
-2. The binding project's `<XcodeProject>` item triggers `xcodebuild archive` for both device and simulator
-3. An xcframework is automatically created and linked as a `NativeReference`
-4. A custom MSBuild target extracts `Metadata.appintents` from the xcarchive
-5. The MAUI project copies `Metadata.appintents` into the app bundle
+1. The handwritten sample still builds its Swift framework through the binding project's `<XcodeProject>` item.
+2. When `MauiAppIntentsEnabled=true`, the reusable package also scans attributed C# and generates a SwiftPM package under `obj/`.
+3. The generated SwiftPM package is archived with `xcodebuild`, producing an xcframework and `Metadata.appintents` without a checked-in generated `.xcodeproj`.
+4. MSBuild registers the generated xcframework as a `NativeReference`, copies generated `Metadata.appintents` into the `.app`, and validates the bundle before codesigning.
+5. Incremental inputs/outputs track the generated Swift, runtime shim, build script, metadata, xcframework, and validation stamp so xcodebuild is skipped when inputs are unchanged.
 
 ## Testing Siri Intents
 

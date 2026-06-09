@@ -11,5 +11,6 @@
     <MauiAppIntentsBuildRoot Condition="'$(MauiAppIntentsBuildRoot)' == ''">$(BaseIntermediateOutputPath)$(Configuration)/$(TargetFramework)/$(_MauiAppIntentsRuntimeIdentifierSegment)maui-appintents/</MauiAppIntentsBuildRoot>
     <MauiAppIntentsForceLoad Condition="'$(MauiAppIntentsForceLoad)' == ''">true</MauiAppIntentsForceLoad>
     <MauiAppIntentsSmartLink Condition="'$(MauiAppIntentsSmartLink)' == ''">false</MauiAppIntentsSmartLink>
+    <MauiAppIntentsValidateBundle Condition="'$(MauiAppIntentsValidateBundle)' == ''">true</MauiAppIntentsValidateBundle>
   </PropertyGroup>
 </Project>
