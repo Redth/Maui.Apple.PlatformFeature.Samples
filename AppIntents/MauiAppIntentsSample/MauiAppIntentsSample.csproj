@@ -32,6 +32,10 @@
 		<WindowsPackageType>None</WindowsPackageType>
 
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">17.0</SupportedOSPlatformVersion>
+
+		<!-- Prototype generated App Intents path: C# attributes -> SwiftPM -> Metadata.appintents. -->
+		<MauiAppIntentsEnabled>true</MauiAppIntentsEnabled>
+		<MauiAppIntentsModuleName>MauiAppIntentsSampleGeneratedIntents</MauiAppIntentsModuleName>
 	</PropertyGroup>
 
 	<ItemGroup>
@@ -60,13 +64,18 @@
 
 	<!-- Reference the Swift App Intents binding library -->
 	<ItemGroup>
+		<ProjectReference Include="..\Maui.AppIntents\Maui.AppIntents.csproj" />
 		<ProjectReference Include="..\MauiAppIntentsSample.Binding\MauiAppIntentsSample.Binding.csproj" />
 	</ItemGroup>
+
+	<!-- Local project-reference import for the prototype package. NuGet consumers get this from buildTransitive. -->
+	<Import Project="..\Maui.AppIntents\buildTransitive\Maui.AppIntents.props" />
+	<Import Project="..\Maui.AppIntents\buildTransitive\Maui.AppIntents.targets" />
 
 	<!-- Copy App Intents Metadata into the app bundle so iOS discovers the intents.
 	     The metadata is extracted by the binding project's ExtractAppIntentsMetadata target
 	     from the xcarchive output into its intermediate directory. -->
-	<Target Name="CopyAppIntentsMetadata" AfterTargets="_CopyResourcesToBundle">
+	<Target Name="CopyAppIntentsMetadata" AfterTargets="_CopyResourcesToBundle" Condition="'$(MauiAppIntentsEnabled)' != 'true'">
 		<PropertyGroup>
 			<_BindingMetadataDir>..\MauiAppIntentsSample.Binding\obj\$(Configuration)\$(TargetFramework)\xcode\Metadata.appintents</_BindingMetadataDir>
 		</PropertyGroup>

@@ -1,4 +1,6 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using Maui.AppIntents;
+using MauiAppIntentsSample.AppIntents;
+using Microsoft.Extensions.Logging;
 using MauiAppIntentsSample.Services;
 using MauiAppIntentsSample.ViewModels;
 using MauiAppIntentsSample.Views;
@@ -20,6 +22,8 @@ public static class MauiProgram
 
 		// Services
 		builder.Services.AddSingleton<ITaskService, TaskService>();
+		builder.Services.AddTransient<CreateGeneratedTaskIntent>();
+		builder.Services.AddMauiAppIntents();
 #if IOS
 		builder.Services.AddSingleton<IIntentDonationService, Platforms.iOS.IntentDonationService>();
 #endif

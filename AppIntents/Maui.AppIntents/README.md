@@ -12,6 +12,8 @@ The intended flow is:
 
 The reusable part is the C# API, generated dispatcher, native bridge glue, and Swift runtime JSON bridge. The per-app generated Swift stays intentionally small: only the `AppIntent`, `AppEntity`, `AppEnum`, `EntityQuery`, and `AppShortcutsProvider` declarations Apple needs to extract metadata.
 
+At runtime the generated C# glue loads the embedded SwiftPM framework from `NSBundle.MainBundle.PrivateFrameworksPath` and resolves a stable C ABI entry point with `dlopen`/`dlsym`. This avoids depending on direct `[DllImport("<FrameworkName>")]` resolution, which is not reliable for copied embedded frameworks on iOS.
+
 ## C# authoring example
 
 ```csharp
@@ -75,6 +77,16 @@ Maui.AppIntents.MauiAppIntentsNative.WireUp(IPlatformApplication.Current!.Servic
 ```
 
 `MauiAppIntentsArchivePlatforms` can be set to `Simulator`, `Device`, or `Both`. By default, simulator RIDs build only simulator archives, device RIDs build only device archives, and RID-less builds archive both.
+
+## Simulator validation
+
+The current vertical slice has been validated with the sample app on an iPhone 17 simulator:
+
+- `dotnet build -f net10.0-ios -r iossimulator-arm64 -p:CodesignEntitlements=` builds the MAUI app, generated SwiftPM package, xcframework, and `Metadata.appintents`.
+- The app bundle contains `Frameworks/<ModuleName>.framework` and `Metadata.appintents/extract.actionsdata`.
+- The generated framework exports `MauiAppIntentBridgeSetDispatcher`.
+- On launch, logs include `[AppIntents] Generated bridge wired up successfully.`
+- The simulator indexes the generated shortcut phrase in the app's custom vocabulary, e.g. `Create a generated task in TaskTracker`.
 
 ## Current v1 scope
 

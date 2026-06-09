@@ -177,7 +177,7 @@ This target is **not** wired into the default MAUI build yet. The default build 
 
 ### Prototype: C#-Authored App Intents Package
 
-`Maui.AppIntents/` is the reusable package prototype for the next step: app developers write C# intent handlers and set `MauiAppIntentsEnabled=true`; MSBuild then generates Swift declarations, a SwiftPM package under `obj/`, an xcframework, C# native bridge glue, and `Metadata.appintents` without a checked-in `.xcodeproj`.
+`Maui.AppIntents/` is the reusable package prototype for the generated path: app developers write C# intent handlers and set `MauiAppIntentsEnabled=true`; MSBuild then generates Swift declarations, a SwiftPM package under `obj/`, an xcframework, C# native bridge glue, and `Metadata.appintents` without a checked-in `.xcodeproj`.
 
 The current package vertical slice supports primitive parameters and app shortcuts:
 
@@ -198,6 +198,16 @@ public sealed class CreateTaskIntent : IAppIntentHandler<CreateTaskIntent.Reques
 ```
 
 See `Maui.AppIntents/README.md` for the package API, AppDelegate bridge hookup, build properties, and current v1 scope.
+
+The sample app currently wires one generated intent, `CreateGeneratedTaskIntent`, alongside the hand-written Swift/binding sample to validate the end-to-end packaging and bridge model. During generated-path validation, the app-level `Metadata.appintents` copy comes from `Maui.AppIntents`, so the generated metadata is the bundle metadata iOS indexes.
+
+Simulator validation has confirmed:
+
+- the generated SwiftPM framework is embedded under `Frameworks/`
+- `Metadata.appintents/extract.actionsdata` contains `CreateGeneratedTaskIntent`
+- the generated C ABI bridge symbol is exported from the framework
+- startup logs include `[AppIntents] Generated bridge wired up successfully.`
+- iOS indexes the generated shortcut phrase as `Create a generated task in TaskTracker`
 
 ### How the Build Works
 

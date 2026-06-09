@@ -7,7 +7,8 @@
     <_MauiAppIntentsDefaultModuleName>$([System.Text.RegularExpressions.Regex]::Replace('$(MSBuildProjectName)AppIntents', '[^A-Za-z0-9_]', ''))</_MauiAppIntentsDefaultModuleName>
     <MauiAppIntentsModuleName Condition="'$(MauiAppIntentsModuleName)' == ''">$(_MauiAppIntentsDefaultModuleName)</MauiAppIntentsModuleName>
     <MauiAppIntentsMinimumOSVersion Condition="'$(MauiAppIntentsMinimumOSVersion)' == ''">17.0</MauiAppIntentsMinimumOSVersion>
-    <MauiAppIntentsBuildRoot Condition="'$(MauiAppIntentsBuildRoot)' == ''">$(IntermediateOutputPath)maui-appintents/</MauiAppIntentsBuildRoot>
+    <_MauiAppIntentsRuntimeIdentifierSegment Condition="'$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)/</_MauiAppIntentsRuntimeIdentifierSegment>
+    <MauiAppIntentsBuildRoot Condition="'$(MauiAppIntentsBuildRoot)' == ''">$(BaseIntermediateOutputPath)$(Configuration)/$(TargetFramework)/$(_MauiAppIntentsRuntimeIdentifierSegment)maui-appintents/</MauiAppIntentsBuildRoot>
     <MauiAppIntentsForceLoad Condition="'$(MauiAppIntentsForceLoad)' == ''">true</MauiAppIntentsForceLoad>
     <MauiAppIntentsSmartLink Condition="'$(MauiAppIntentsSmartLink)' == ''">false</MauiAppIntentsSmartLink>
   </PropertyGroup>

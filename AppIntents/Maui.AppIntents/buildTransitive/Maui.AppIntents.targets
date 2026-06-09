@@ -310,19 +310,19 @@ import Foundation
 }
 
 @_cdecl(""MauiAppIntentBridgeSetDispatcher"")
-public func MauiAppIntentBridgeSetDispatcher(_ dispatcher: UnsafeMutableRawPointer?) -> Bool {
+public func MauiAppIntentBridgeSetDispatcher(_ dispatcher: UnsafeMutableRawPointer?) -> Int32 {
     guard let dispatcher else {
         MauiAppIntentBridge.shared.dispatcher = nil
-        return true
+        return 1
     }
 
     let instance = Unmanaged<AnyObject>.fromOpaque(dispatcher).takeUnretainedValue()
     guard let typedDispatcher = instance as? MauiAppIntentDispatching else {
-        return false
+        return 0
     }
 
     MauiAppIntentBridge.shared.dispatcher = typedDispatcher
-    return true
+    return 1
 }
 
 public struct MauiAppIntentResponse: Decodable {
@@ -457,10 +457,12 @@ public enum MauiAppIntentRuntimeError: Error, CustomLocalizedStringResourceConve
         var script = @"#!/usr/bin/env bash
 set -euo pipefail
 
-PACKAGE_DIR=""" + OutputDirectory.Replace("\\", "/") + @"""
+SCRIPT_PATH=""${BASH_SOURCE[0]}""
+SCRIPT_DIR=""${SCRIPT_PATH%/*}""
+PACKAGE_DIR=`cd ""$SCRIPT_DIR"" && pwd`
 SCHEME=""" + EscapeBash(ModuleName) + @"""
 CONFIGURATION=""${CONFIGURATION:-Debug}""
-BUILD_DIR=""${BUILD_DIR:-" + Path.Combine(OutputDirectory, "..", "native").Replace("\\", "/") + @"}""
+BUILD_DIR=""${BUILD_DIR:-$PACKAGE_DIR/../native}""
 ARCHIVE_PLATFORMS=""${ARCHIVE_PLATFORMS:-" + EscapeBash(ArchivePlatforms) + @"}""
 
 rm -rf ""$BUILD_DIR""
@@ -541,6 +543,7 @@ date -u +%Y-%m-%dT%H:%M:%SZ > ""$BUILD_DIR/appintents-build.stamp""
 #if IOS || MACCATALYST
 using System;
 using Foundation;
+using System.IO;
 using Microsoft.Extensions.DependencyInjection;
 using ObjCRuntime;
 using System.Runtime.InteropServices;
@@ -549,7 +552,13 @@ namespace Maui.AppIntents;
 
 public static class MauiAppIntentsNative
 {
+    private const int RTLD_NOW = 2;
+    private const string ModuleName = """ + EscapeCSharp(ModuleName) + @""";
+    private const string BridgeSetDispatcherSymbol = ""MauiAppIntentBridgeSetDispatcher"";
+
     private static MauiAppIntentDispatcherAdapter s_adapter;
+    private static IntPtr s_nativeLibraryHandle;
+    private static MauiAppIntentBridgeSetDispatcherDelegate s_setDispatcher;
 
     public static void WireUp(IServiceProvider services)
     {
@@ -560,16 +569,56 @@ public static class MauiAppIntentsNative
 
         var dispatcher = services.GetRequiredService<MauiAppIntentDispatcher>();
         s_adapter = new MauiAppIntentDispatcherAdapter(dispatcher);
+        s_setDispatcher ??= ResolveBridgeSetDispatcher();
 
-        if (!MauiAppIntentBridgeSetDispatcher(s_adapter.Handle))
+        if (s_setDispatcher(s_adapter.Handle) == 0)
         {
             throw new InvalidOperationException(""The generated Swift bridge rejected the managed dispatcher. Ensure the generated adapter conforms to MauiAppIntentDispatching."");
         }
     }
 
-    [DllImport(""" + EscapeCSharp(ModuleName) + @""", EntryPoint = ""MauiAppIntentBridgeSetDispatcher"")]
-    [return: MarshalAs(UnmanagedType.I1)]
-    private static extern bool MauiAppIntentBridgeSetDispatcher(IntPtr dispatcher);
+    private static MauiAppIntentBridgeSetDispatcherDelegate ResolveBridgeSetDispatcher()
+    {
+        var privateFrameworksPath = NSBundle.MainBundle.PrivateFrameworksPath;
+        if (string.IsNullOrWhiteSpace(privateFrameworksPath))
+        {
+            throw new InvalidOperationException(""The app bundle does not expose a private Frameworks path for the generated App Intents framework."");
+        }
+
+        var libraryPath = Path.Combine(privateFrameworksPath, ModuleName + "".framework"", ModuleName);
+        // Embedded SwiftPM frameworks are copied into the app bundle; resolve the C ABI bridge from that exact binary.
+        s_nativeLibraryHandle = dlopen(libraryPath, RTLD_NOW);
+        if (s_nativeLibraryHandle == IntPtr.Zero)
+        {
+            throw new InvalidOperationException(""Could not load the generated App Intents framework at '"" + libraryPath + ""'. "" + GetDlError());
+        }
+
+        var symbol = dlsym(s_nativeLibraryHandle, BridgeSetDispatcherSymbol);
+        if (symbol == IntPtr.Zero)
+        {
+            throw new InvalidOperationException(""Could not find the generated App Intents bridge symbol '"" + BridgeSetDispatcherSymbol + ""' in '"" + libraryPath + ""'. "" + GetDlError());
+        }
+
+        return Marshal.GetDelegateForFunctionPointer<MauiAppIntentBridgeSetDispatcherDelegate>(symbol);
+    }
+
+    private static string GetDlError()
+    {
+        var error = dlerror();
+        return error == IntPtr.Zero ? string.Empty : Marshal.PtrToStringAnsi(error) ?? string.Empty;
+    }
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int MauiAppIntentBridgeSetDispatcherDelegate(IntPtr dispatcher);
+
+    [DllImport(""/usr/lib/libSystem.dylib"", EntryPoint = ""dlopen"")]
+    private static extern IntPtr dlopen(string path, int mode);
+
+    [DllImport(""/usr/lib/libSystem.dylib"", EntryPoint = ""dlsym"")]
+    private static extern IntPtr dlsym(IntPtr handle, string symbol);
+
+    [DllImport(""/usr/lib/libSystem.dylib"", EntryPoint = ""dlerror"")]
+    private static extern IntPtr dlerror();
 }
 
 [Protocol(Name = ""MauiAppIntentDispatching"")]
