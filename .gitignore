@@ -2,6 +2,7 @@
 bin/
 obj/
 build/
+artifacts/
 XReleases/
 
 # .NET

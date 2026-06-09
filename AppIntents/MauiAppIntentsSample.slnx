@@ -1,6 +1,9 @@
 <Solution>
-  <Folder Name="/src/">
-    <Project Path="src/MauiAppIntentsSample.Binding/MauiAppIntentsSample.Binding.csproj" />
-    <Project Path="src/MauiAppIntentsSample/MauiAppIntentsSample.csproj" />
+  <Folder Name="/App/">
+    <Project Path="MauiAppIntentsSample/MauiAppIntentsSample.csproj" />
+    <Project Path="MauiAppIntentsSample.Binding/MauiAppIntentsSample.Binding.csproj" />
+  </Folder>
+  <Folder Name="/Packages/">
+    <Project Path="Maui.AppIntents/Maui.AppIntents.csproj" />
   </Folder>
 </Solution>

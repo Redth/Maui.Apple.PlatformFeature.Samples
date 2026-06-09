@@ -1,0 +1,14 @@
+<Project>
+  <PropertyGroup>
+    <MauiAppIntentsEnabled Condition="'$(MauiAppIntentsEnabled)' == ''">false</MauiAppIntentsEnabled>
+    <MauiAppIntentsArchivePlatforms Condition="'$(MauiAppIntentsArchivePlatforms)' == '' and $([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('iossimulator'))">Simulator</MauiAppIntentsArchivePlatforms>
+    <MauiAppIntentsArchivePlatforms Condition="'$(MauiAppIntentsArchivePlatforms)' == '' and $([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('ios-'))">Device</MauiAppIntentsArchivePlatforms>
+    <MauiAppIntentsArchivePlatforms Condition="'$(MauiAppIntentsArchivePlatforms)' == ''">Both</MauiAppIntentsArchivePlatforms>
+    <_MauiAppIntentsDefaultModuleName>$([System.Text.RegularExpressions.Regex]::Replace('$(MSBuildProjectName)AppIntents', '[^A-Za-z0-9_]', ''))</_MauiAppIntentsDefaultModuleName>
+    <MauiAppIntentsModuleName Condition="'$(MauiAppIntentsModuleName)' == ''">$(_MauiAppIntentsDefaultModuleName)</MauiAppIntentsModuleName>
+    <MauiAppIntentsMinimumOSVersion Condition="'$(MauiAppIntentsMinimumOSVersion)' == ''">17.0</MauiAppIntentsMinimumOSVersion>
+    <MauiAppIntentsBuildRoot Condition="'$(MauiAppIntentsBuildRoot)' == ''">$(IntermediateOutputPath)maui-appintents/</MauiAppIntentsBuildRoot>
+    <MauiAppIntentsForceLoad Condition="'$(MauiAppIntentsForceLoad)' == ''">true</MauiAppIntentsForceLoad>
+    <MauiAppIntentsSmartLink Condition="'$(MauiAppIntentsSmartLink)' == ''">false</MauiAppIntentsSmartLink>
+  </PropertyGroup>
+</Project>

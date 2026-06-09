@@ -1,0 +1,786 @@
+<Project>
+  <PropertyGroup>
+    <_MauiAppIntentsPlatform>$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)'))</_MauiAppIntentsPlatform>
+    <_MauiAppIntentsShouldBuild Condition="'$(MauiAppIntentsEnabled)' == 'true' and ('$(DesignTimeBuild)' != 'true') and '$(_MauiAppIntentsPlatform)' == 'ios'">true</_MauiAppIntentsShouldBuild>
+    <DefineConstants Condition="'$(_MauiAppIntentsShouldBuild)' == 'true'">$(DefineConstants);MAUI_APPINTENTS</DefineConstants>
+    <_MauiAppIntentsPackageDir>$(MauiAppIntentsBuildRoot)swiftpm/</_MauiAppIntentsPackageDir>
+    <_MauiAppIntentsOutputDir>$(MauiAppIntentsBuildRoot)native/</_MauiAppIntentsOutputDir>
+    <_MauiAppIntentsXcframework>$(_MauiAppIntentsOutputDir)xcframeworks/$(MauiAppIntentsModuleName).xcframework</_MauiAppIntentsXcframework>
+    <_MauiAppIntentsMetadataDir>$(_MauiAppIntentsOutputDir)Metadata.appintents</_MauiAppIntentsMetadataDir>
+    <_MauiAppIntentsBuildStamp>$(_MauiAppIntentsOutputDir)appintents-build.stamp</_MauiAppIntentsBuildStamp>
+    <_MauiAppIntentsGeneratedSwift>$(_MauiAppIntentsPackageDir)Sources/$(MauiAppIntentsModuleName)/Generated/AppIntents.generated.swift</_MauiAppIntentsGeneratedSwift>
+    <_MauiAppIntentsGeneratedRegistration>$(MauiAppIntentsBuildRoot)managed/MauiAppIntentGeneratedRegistration.g.cs</_MauiAppIntentsGeneratedRegistration>
+    <_MauiAppIntentsGeneratedNativeBinding>$(MauiAppIntentsBuildRoot)managed/MauiAppIntentNativeBridge.g.cs</_MauiAppIntentsGeneratedNativeBinding>
+  </PropertyGroup>
+
+  <UsingTask TaskName="GenerateMauiAppIntentsFiles"
+             TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <Sources ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" />
+      <OutputDirectory ParameterType="System.String" Required="true" />
+      <ManagedOutputFile ParameterType="System.String" Required="true" />
+      <NativeBindingOutputFile ParameterType="System.String" Required="true" />
+      <ModuleName ParameterType="System.String" Required="true" />
+      <MinimumOSVersion ParameterType="System.String" Required="true" />
+      <ArchivePlatforms ParameterType="System.String" Required="true" />
+      <HasIntents ParameterType="System.Boolean" Output="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System" />
+      <Using Namespace="System.Collections.Generic" />
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Linq" />
+      <Using Namespace="System.Text" />
+      <Using Namespace="System.Text.RegularExpressions" />
+      <Code Type="Class" Language="cs"><![CDATA[
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
+
+public sealed class GenerateMauiAppIntentsFiles : Microsoft.Build.Utilities.Task
+{
+    public Microsoft.Build.Framework.ITaskItem[] Sources { get; set; }
+    public string OutputDirectory { get; set; }
+    public string ManagedOutputFile { get; set; }
+    public string NativeBindingOutputFile { get; set; }
+    public string ModuleName { get; set; }
+    public string MinimumOSVersion { get; set; }
+    public string ArchivePlatforms { get; set; }
+    public bool HasIntents { get; set; }
+
+    private sealed class Intent
+    {
+        public string Namespace = "";
+        public string HandlerType = "";
+        public string RequestType = "";
+        public string Identifier = "";
+        public string Title = "";
+        public string Description = "";
+        public string ParameterSummary = "";
+        public bool OpenAppWhenRun;
+        public readonly List<Parameter> Parameters = new List<Parameter>();
+        public readonly List<Shortcut> Shortcuts = new List<Shortcut>();
+    }
+
+    private sealed class Parameter
+    {
+        public string Name = "";
+        public string SwiftName = "";
+        public string Title = "";
+        public string Type = "";
+        public bool IsOptional;
+        public double? Minimum;
+        public double? Maximum;
+    }
+
+    private sealed class Shortcut
+    {
+        public string Phrase = "";
+        public string ShortTitle = "";
+        public string SystemImageName = "";
+    }
+
+    public override bool Execute()
+    {
+        try
+        {
+            if (!Regex.IsMatch(ModuleName ?? "", "^[A-Za-z_][A-Za-z0-9_]*$"))
+            {
+                Log.LogError("MauiAppIntentsModuleName must be a valid Swift module identifier. Use only letters, digits, and underscores, and do not start with a digit.");
+                return false;
+            }
+
+            var intents = DiscoverIntents().ToList();
+            HasIntents = intents.Count > 0;
+            Directory.CreateDirectory(OutputDirectory);
+            Directory.CreateDirectory(Path.GetDirectoryName(ManagedOutputFile));
+            Directory.CreateDirectory(Path.GetDirectoryName(NativeBindingOutputFile));
+
+            WritePackage();
+            WriteRuntimeSwift();
+            WriteGeneratedSwift(intents);
+            WriteManagedRegistration(intents);
+            WriteNativeBinding();
+            WriteBuildScript();
+
+            Log.LogMessage(Microsoft.Build.Framework.MessageImportance.High, "Generated {0} MAUI App Intent declaration(s).", intents.Count);
+            return !Log.HasLoggedErrors;
+        }
+        catch (Exception ex)
+        {
+            Log.LogErrorFromException(ex, showStackTrace: true);
+            return false;
+        }
+    }
+
+    private IEnumerable<Intent> DiscoverIntents()
+    {
+        foreach (var source in Sources ?? Array.Empty<Microsoft.Build.Framework.ITaskItem>())
+        {
+            var path = source.ItemSpec;
+            if (!File.Exists(path) || path.IndexOf(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                continue;
+            }
+
+            var text = File.ReadAllText(path);
+            if (text.IndexOf("AppIntent", StringComparison.Ordinal) < 0)
+            {
+                continue;
+            }
+
+            var ns = Regex.Match(text, @"namespace\s+([A-Za-z_][A-Za-z0-9_.]*)\s*[;{]").Groups[1].Value;
+            foreach (Match classMatch in Regex.Matches(text, @"(?<attrs>(?:\s*\[[^\]]*(?:AppIntent|AppShortcut)[^\]]*\]\s*)+)(?:public\s+)?(?:sealed\s+|partial\s+|abstract\s+)*class\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)", RegexOptions.Singleline))
+            {
+                var attrs = classMatch.Groups["attrs"].Value;
+                var appIntent = Regex.Match(attrs, @"AppIntent\s*\((?<args>[^\)]*)\)");
+                if (!appIntent.Success)
+                {
+                    continue;
+                }
+
+                var name = classMatch.Groups["name"].Value;
+                var intent = new Intent
+                {
+                    Namespace = ns,
+                    HandlerType = string.IsNullOrEmpty(ns) ? name : ns + "." + name,
+                    RequestType = string.IsNullOrEmpty(ns) ? name + ".Request" : ns + "." + name + ".Request",
+                    Identifier = FirstString(appIntent.Groups["args"].Value) ?? name,
+                    Title = NamedString(appIntent.Groups["args"].Value, "Title") ?? SplitWords(name),
+                    Description = NamedString(appIntent.Groups["args"].Value, "Description") ?? "",
+                    ParameterSummary = NamedString(appIntent.Groups["args"].Value, "ParameterSummary") ?? "",
+                    OpenAppWhenRun = NamedBool(appIntent.Groups["args"].Value, "OpenAppWhenRun") ?? false
+                };
+
+                foreach (Match shortcutMatch in Regex.Matches(attrs, @"AppShortcut\s*\((?<args>[^\)]*)\)"))
+                {
+                    var args = shortcutMatch.Groups["args"].Value;
+                    intent.Shortcuts.Add(new Shortcut
+                    {
+                        Phrase = FirstString(args) ?? "",
+                        ShortTitle = NamedString(args, "ShortTitle") ?? intent.Title,
+                        SystemImageName = NamedString(args, "SystemImageName") ?? "sparkles"
+                    });
+                }
+
+                var classStart = classMatch.Index + classMatch.Length;
+                var classText = text.Substring(classStart, Math.Min(text.Length - classStart, 12000));
+                foreach (var parameter in DiscoverParameters(classText))
+                {
+                    intent.Parameters.Add(parameter);
+                }
+
+                yield return intent;
+            }
+        }
+    }
+
+    private IEnumerable<Parameter> DiscoverParameters(string classText)
+    {
+        foreach (Match propMatch in Regex.Matches(classText, @"\[IntentParameter\s*\((?<args>[^\)]*)\)\]\s*(?:public\s+)?(?<type>[A-Za-z_][A-Za-z0-9_<>?\.]*)\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*{", RegexOptions.Singleline))
+        {
+            var args = propMatch.Groups["args"].Value;
+            var type = propMatch.Groups["type"].Value;
+            var name = propMatch.Groups["name"].Value;
+            yield return CreateParameter(args, type, name);
+        }
+
+        var requestRecord = Regex.Match(classText, @"(?:(?:public|private|internal|protected|sealed|partial|readonly)\s+)*(?:record|class)\s+Request\s*\(", RegexOptions.Singleline);
+        if (requestRecord.Success)
+        {
+            var openParen = classText.IndexOf('(', requestRecord.Index);
+            var requestArgs = ExtractParenthesized(classText, openParen);
+            foreach (Match paramMatch in Regex.Matches(requestArgs, @"(?:\[property:\s*IntentParameter\s*\((?<attr>[^\)]*)\)\]\s*)?(?<type>[A-Za-z_][A-Za-z0-9_<>?\.]*)\s+(?<name>[A-Za-z_][A-Za-z0-9_]*)"))
+            {
+                var attr = paramMatch.Groups["attr"].Value;
+                var type = paramMatch.Groups["type"].Value;
+                var name = paramMatch.Groups["name"].Value;
+                yield return CreateParameter(attr, type, name);
+            }
+        }
+    }
+
+    private static string ExtractParenthesized(string text, int openParen)
+    {
+        if (openParen < 0 || openParen >= text.Length || text[openParen] != '(')
+        {
+            return "";
+        }
+
+        var depth = 0;
+        for (var i = openParen; i < text.Length; i++)
+        {
+            var ch = text[i];
+            if (ch == '(')
+            {
+                depth++;
+            }
+            else if (ch == ')')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return text.Substring(openParen + 1, i - openParen - 1);
+                }
+            }
+        }
+
+        return "";
+    }
+
+    private static Parameter CreateParameter(string args, string type, string name)
+    {
+        return new Parameter
+        {
+            Name = name,
+            SwiftName = LowerFirst(name),
+            Title = FirstString(args) ?? SplitWords(name),
+            Type = type,
+            IsOptional = type.EndsWith("?", StringComparison.Ordinal) || type.StartsWith("Nullable<", StringComparison.Ordinal) || (NamedBool(args, "IsOptional") ?? false),
+            Minimum = NamedDouble(args, "InclusiveMinimum"),
+            Maximum = NamedDouble(args, "InclusiveMaximum")
+        };
+    }
+
+    private void WritePackage()
+    {
+        var package = Path.Combine(OutputDirectory, "Package.swift");
+        File.WriteAllText(package,
+@"// swift-tools-version: 6.0
+import PackageDescription
+
+let package = Package(
+    name: """ + EscapeSwift(ModuleName) + @""",
+    platforms: [
+        .iOS(""" + EscapeSwift(MinimumOSVersion) + @""")
+    ],
+    products: [
+        .library(name: """ + EscapeSwift(ModuleName) + @""", type: .dynamic, targets: [""" + EscapeSwift(ModuleName) + @"""])
+    ],
+    targets: [
+        .target(
+            name: """ + EscapeSwift(ModuleName) + @""",
+            path: ""Sources/" + EscapeSwift(ModuleName) + @""",
+            linkerSettings: [
+                .linkedFramework(""AppIntents""),
+                .linkedFramework(""Foundation"")
+            ]
+        )
+    ],
+    swiftLanguageModes: [.v5]
+)
+");
+    }
+
+    private void WriteRuntimeSwift()
+    {
+        var runtimeDir = Path.Combine(OutputDirectory, "Sources", ModuleName, "Runtime");
+        Directory.CreateDirectory(runtimeDir);
+        File.WriteAllText(Path.Combine(runtimeDir, "MauiAppIntentsRuntime.swift"),
+@"import AppIntents
+import Foundation
+
+@objc(MauiAppIntentDispatching) public protocol MauiAppIntentDispatching: AnyObject {
+    func dispatchIntent(identifier: String, payload: String) -> String
+}
+
+@objc(MauiAppIntentBridge) public final class MauiAppIntentBridge: NSObject {
+    @objc public static let shared = MauiAppIntentBridge()
+    @objc public weak var dispatcher: MauiAppIntentDispatching?
+
+    private override init() {
+        super.init()
+    }
+
+    public func perform(identifier: String, payload: [String: Any]) throws -> MauiAppIntentResponse {
+        guard let dispatcher else {
+            throw MauiAppIntentRuntimeError.notReady
+        }
+
+        let data = try JSONSerialization.data(withJSONObject: payload, options: [])
+        let json = String(data: data, encoding: .utf8) ?? ""{}""
+        let responseJson = dispatcher.dispatchIntent(identifier: identifier, payload: json)
+        let responseData = Data(responseJson.utf8)
+        return try JSONDecoder().decode(MauiAppIntentResponse.self, from: responseData)
+    }
+}
+
+@_cdecl(""MauiAppIntentBridgeSetDispatcher"")
+public func MauiAppIntentBridgeSetDispatcher(_ dispatcher: UnsafeMutableRawPointer?) -> Bool {
+    guard let dispatcher else {
+        MauiAppIntentBridge.shared.dispatcher = nil
+        return true
+    }
+
+    let instance = Unmanaged<AnyObject>.fromOpaque(dispatcher).takeUnretainedValue()
+    guard let typedDispatcher = instance as? MauiAppIntentDispatching else {
+        return false
+    }
+
+    MauiAppIntentBridge.shared.dispatcher = typedDispatcher
+    return true
+}
+
+public struct MauiAppIntentResponse: Decodable {
+    public var success: Bool
+    public var dialog: String?
+    public var error: String?
+}
+
+public enum MauiAppIntentRuntimeError: Error, CustomLocalizedStringResourceConvertible {
+    case notReady
+    case failed(String)
+
+    public var localizedStringResource: LocalizedStringResource {
+        switch self {
+        case .notReady:
+            return ""The app is not ready.""
+        case .failed(let message):
+            return LocalizedStringResource(stringLiteral: message)
+        }
+    }
+}
+");
+    }
+
+    private void WriteGeneratedSwift(List<Intent> intents)
+    {
+        var generatedDir = Path.Combine(OutputDirectory, "Sources", ModuleName, "Generated");
+        Directory.CreateDirectory(generatedDir);
+        var sb = new StringBuilder();
+        sb.AppendLine("import AppIntents");
+        sb.AppendLine("import Foundation");
+        sb.AppendLine();
+
+        foreach (var intent in intents)
+        {
+            sb.AppendLine("struct " + SanitizeIdentifier(intent.Identifier) + ": AppIntent {");
+            sb.AppendLine("    static var title: LocalizedStringResource = \"" + EscapeSwift(intent.Title) + "\"");
+            if (!string.IsNullOrWhiteSpace(intent.Description))
+            {
+                sb.AppendLine("    static var description = IntentDescription(\"" + EscapeSwift(intent.Description) + "\")");
+            }
+            sb.AppendLine("    static var openAppWhenRun: Bool = " + (intent.OpenAppWhenRun ? "true" : "false"));
+            sb.AppendLine();
+
+            foreach (var parameter in intent.Parameters)
+            {
+                var range = "";
+                if (parameter.Minimum.HasValue && parameter.Maximum.HasValue && IsNumeric(parameter.Type))
+                {
+                    range = ", inclusiveRange: (" + parameter.Minimum.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) + ", " + parameter.Maximum.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) + ")";
+                }
+                sb.AppendLine("    @Parameter(title: \"" + EscapeSwift(parameter.Title) + "\"" + range + ")");
+                sb.AppendLine("    var " + parameter.SwiftName + ": " + SwiftType(parameter));
+                sb.AppendLine();
+            }
+
+            if (!string.IsNullOrWhiteSpace(intent.ParameterSummary))
+            {
+                sb.AppendLine("    static var parameterSummary: some ParameterSummary {");
+                sb.AppendLine("        Summary(\"" + EscapeSwift(intent.ParameterSummary) + "\")");
+                sb.AppendLine("    }");
+                sb.AppendLine();
+            }
+
+            sb.AppendLine("    func perform() async throws -> some IntentResult & ProvidesDialog {");
+            sb.AppendLine("        let response = try MauiAppIntentBridge.shared.perform(identifier: \"" + EscapeSwift(intent.Identifier) + "\", payload: [");
+            for (var i = 0; i < intent.Parameters.Count; i++)
+            {
+                var p = intent.Parameters[i];
+                var suffix = i == intent.Parameters.Count - 1 ? "" : ",";
+                sb.AppendLine("            \"" + EscapeSwift(p.SwiftName) + "\": " + PayloadExpression(p) + suffix);
+            }
+            sb.AppendLine("        ])");
+            sb.AppendLine("        if response.success == false { throw MauiAppIntentRuntimeError.failed(response.error ?? \"Intent failed\") }");
+            sb.AppendLine("        return .result(dialog: IntentDialog(stringLiteral: response.dialog ?? \"Done\"))");
+            sb.AppendLine("    }");
+            sb.AppendLine("}");
+            sb.AppendLine();
+        }
+
+        var shortcuts = intents.Where(i => i.Shortcuts.Count > 0).ToList();
+        if (shortcuts.Count > 0)
+        {
+            sb.AppendLine("struct GeneratedAppShortcuts: AppShortcutsProvider {");
+            sb.AppendLine("    @AppShortcutsBuilder");
+            sb.AppendLine("    static var appShortcuts: [AppShortcut] {");
+            foreach (var intent in shortcuts)
+            {
+                var first = intent.Shortcuts[0];
+                sb.AppendLine("        AppShortcut(");
+                sb.AppendLine("            intent: " + SanitizeIdentifier(intent.Identifier) + "(),");
+                sb.AppendLine("            phrases: [");
+                for (var i = 0; i < intent.Shortcuts.Count; i++)
+                {
+                    var suffix = i == intent.Shortcuts.Count - 1 ? "" : ",";
+                    sb.AppendLine("                \"" + EscapeSwift(intent.Shortcuts[i].Phrase).Replace("${applicationName}", "\\(.applicationName)") + "\"" + suffix);
+                }
+                sb.AppendLine("            ],");
+                sb.AppendLine("            shortTitle: \"" + EscapeSwift(first.ShortTitle) + "\",");
+                sb.AppendLine("            systemImageName: \"" + EscapeSwift(first.SystemImageName) + "\"");
+                sb.AppendLine("        )");
+            }
+            sb.AppendLine("    }");
+            sb.AppendLine("}");
+        }
+
+        File.WriteAllText(Path.Combine(generatedDir, "AppIntents.generated.swift"), sb.ToString());
+    }
+
+    private void WriteManagedRegistration(List<Intent> intents)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("// <auto-generated />");
+        sb.AppendLine("namespace Maui.AppIntents.Generated;");
+        sb.AppendLine();
+        sb.AppendLine("public static class MauiAppIntentGeneratedRegistration");
+        sb.AppendLine("{");
+        sb.AppendLine("    public static void Register(global::System.IServiceProvider services, global::Maui.AppIntents.MauiAppIntentRegistry registry)");
+        sb.AppendLine("    {");
+        foreach (var intent in intents)
+        {
+            sb.AppendLine("        registry.Map<global::" + intent.RequestType + ", global::" + intent.HandlerType + ">(\"" + EscapeCSharp(intent.Identifier) + "\", services);");
+        }
+        sb.AppendLine("    }");
+        sb.AppendLine("}");
+        File.WriteAllText(ManagedOutputFile, sb.ToString());
+    }
+
+    private void WriteBuildScript()
+    {
+        var scriptPath = Path.Combine(OutputDirectory, "build-appintents.sh");
+        var script = @"#!/usr/bin/env bash
+set -euo pipefail
+
+PACKAGE_DIR=""" + OutputDirectory.Replace("\\", "/") + @"""
+SCHEME=""" + EscapeBash(ModuleName) + @"""
+CONFIGURATION=""${CONFIGURATION:-Debug}""
+BUILD_DIR=""${BUILD_DIR:-" + Path.Combine(OutputDirectory, "..", "native").Replace("\\", "/") + @"}""
+ARCHIVE_PLATFORMS=""${ARCHIVE_PLATFORMS:-" + EscapeBash(ArchivePlatforms) + @"}""
+
+rm -rf ""$BUILD_DIR""
+mkdir -p ""$BUILD_DIR/archives"" ""$BUILD_DIR/xcframeworks""
+
+archive_platform() {
+  local name=""$1""
+  local sdk=""$2""
+  local destination=""$3""
+  local archive_path=""$BUILD_DIR/archives/$SCHEME-$name.xcarchive""
+  local derived_data=""$BUILD_DIR/DerivedData-$name""
+  (
+    cd ""$PACKAGE_DIR""
+    xcodebuild -scheme ""$SCHEME"" \
+      -configuration ""$CONFIGURATION"" \
+      -sdk ""$sdk"" \
+      -destination ""$destination"" \
+      -derivedDataPath ""$derived_data"" \
+      CODE_SIGNING_ALLOWED=NO \
+      IPHONEOS_DEPLOYMENT_TARGET=""" + EscapeBash(MinimumOSVersion) + @""" \
+      SKIP_INSTALL=NO \
+      BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+      SWIFT_REFLECTION_METADATA_LEVEL=all \
+      archive -archivePath ""$archive_path""
+  )
+}
+
+case ""$ARCHIVE_PLATFORMS"" in
+  Device) archive_platform ios iphoneos generic/platform=iOS ;;
+  Simulator) archive_platform iossimulator iphonesimulator ""generic/platform=iOS Simulator"" ;;
+  Both)
+    archive_platform ios iphoneos generic/platform=iOS
+    archive_platform iossimulator iphonesimulator ""generic/platform=iOS Simulator""
+    ;;
+  *) echo ""Unknown ARCHIVE_PLATFORMS '$ARCHIVE_PLATFORMS'. Use Device, Simulator, or Both."" >&2; exit 2 ;;
+esac
+
+args=()
+if [[ -d ""$BUILD_DIR/archives/$SCHEME-ios.xcarchive"" ]]; then
+  fw=`find ""$BUILD_DIR/archives/$SCHEME-ios.xcarchive/Products"" -name ""$SCHEME.framework"" -type d | head -1`
+  args+=( -framework ""$fw"" )
+  meta=`find ""$BUILD_DIR/archives/$SCHEME-ios.xcarchive/Products"" -path ""*/Metadata.appintents"" -type d | head -1`
+elif [[ -d ""$BUILD_DIR/archives/$SCHEME-iossimulator.xcarchive"" ]]; then
+  fw=`find ""$BUILD_DIR/archives/$SCHEME-iossimulator.xcarchive/Products"" -name ""$SCHEME.framework"" -type d | head -1`
+  args+=( -framework ""$fw"" )
+  meta=`find ""$BUILD_DIR/archives/$SCHEME-iossimulator.xcarchive/Products"" -path ""*/Metadata.appintents"" -type d | head -1`
+fi
+
+if [[ -d ""$BUILD_DIR/archives/$SCHEME-iossimulator.xcarchive"" && ""$ARCHIVE_PLATFORMS"" == ""Both"" ]]; then
+  sim_fw=`find ""$BUILD_DIR/archives/$SCHEME-iossimulator.xcarchive/Products"" -name ""$SCHEME.framework"" -type d | head -1`
+  args+=( -framework ""$sim_fw"" )
+fi
+
+xcodebuild -create-xcframework ""${args[@]}"" -output ""$BUILD_DIR/xcframeworks/$SCHEME.xcframework""
+
+if [[ -z ""${meta:-}"" ]]; then
+  echo ""Metadata.appintents was not produced."" >&2
+  exit 3
+fi
+
+cp -R ""$meta"" ""$BUILD_DIR/Metadata.appintents""
+date -u +%Y-%m-%dT%H:%M:%SZ > ""$BUILD_DIR/appintents-build.stamp""
+";
+        File.WriteAllText(scriptPath, script.Replace("\r\n", "\n"));
+        try
+        {
+            System.Diagnostics.Process.Start("/bin/chmod", "+x \"" + scriptPath + "\"")?.WaitForExit();
+        }
+        catch
+        {
+        }
+    }
+
+    private void WriteNativeBinding()
+    {
+        File.WriteAllText(NativeBindingOutputFile,
+@"// <auto-generated />
+#if IOS || MACCATALYST
+using System;
+using Foundation;
+using Microsoft.Extensions.DependencyInjection;
+using ObjCRuntime;
+using System.Runtime.InteropServices;
+
+namespace Maui.AppIntents;
+
+public static class MauiAppIntentsNative
+{
+    private static MauiAppIntentDispatcherAdapter s_adapter;
+
+    public static void WireUp(IServiceProvider services)
+    {
+        if (services is null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }
+
+        var dispatcher = services.GetRequiredService<MauiAppIntentDispatcher>();
+        s_adapter = new MauiAppIntentDispatcherAdapter(dispatcher);
+
+        if (!MauiAppIntentBridgeSetDispatcher(s_adapter.Handle))
+        {
+            throw new InvalidOperationException(""The generated Swift bridge rejected the managed dispatcher. Ensure the generated adapter conforms to MauiAppIntentDispatching."");
+        }
+    }
+
+    [DllImport(""" + EscapeCSharp(ModuleName) + @""", EntryPoint = ""MauiAppIntentBridgeSetDispatcher"")]
+    [return: MarshalAs(UnmanagedType.I1)]
+    private static extern bool MauiAppIntentBridgeSetDispatcher(IntPtr dispatcher);
+}
+
+[Protocol(Name = ""MauiAppIntentDispatching"")]
+public interface IMauiAppIntentDispatching
+{
+    [Export(""dispatchIntentWithIdentifier:payload:"")]
+    string DispatchIntent(string identifier, string payload);
+}
+
+[Register(""MauiAppIntentDispatcherAdapter"")]
+internal sealed class MauiAppIntentDispatcherAdapter : NSObject, IMauiAppIntentDispatching
+{
+    private readonly MauiAppIntentDispatcher dispatcher;
+
+    public MauiAppIntentDispatcherAdapter(MauiAppIntentDispatcher dispatcher)
+    {
+        this.dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
+    }
+
+    [Export(""dispatchIntentWithIdentifier:payload:"")]
+    public string DispatchIntent(string identifier, string payload)
+    {
+        return dispatcher.Dispatch(identifier, payload);
+    }
+}
+#else
+using System;
+
+namespace Maui.AppIntents;
+
+public static class MauiAppIntentsNative
+{
+    public static void WireUp(IServiceProvider services)
+    {
+        if (services is null)
+        {
+            throw new ArgumentNullException(nameof(services));
+        }
+    }
+}
+#endif
+");
+    }
+
+    private static string SwiftType(Parameter parameter)
+    {
+        var type = NormalizeType(parameter.Type);
+        var swift = type == "string" ? "String" :
+            type == "int" || type == "nint" || type == "long" ? "Int" :
+            type == "double" || type == "float" || type == "decimal" ? "Double" :
+            type == "bool" ? "Bool" :
+            type == "datetime" || type == "datetimeoffset" ? "Date" :
+            "String";
+        return parameter.IsOptional ? swift + "?" : swift;
+    }
+
+    private static string PayloadExpression(Parameter parameter)
+    {
+        var type = NormalizeType(parameter.Type);
+        if (parameter.IsOptional)
+        {
+            if (type == "datetime" || type == "datetimeoffset")
+            {
+                return parameter.SwiftName + ".map { ISO8601DateFormatter().string(from: $0) } ?? NSNull()";
+            }
+            return parameter.SwiftName + " ?? NSNull()";
+        }
+        if (type == "datetime" || type == "datetimeoffset")
+        {
+            return "ISO8601DateFormatter().string(from: " + parameter.SwiftName + ")";
+        }
+        return parameter.SwiftName;
+    }
+
+    private static bool IsNumeric(string type)
+    {
+        var normalized = NormalizeType(type);
+        return normalized == "int" || normalized == "nint" || normalized == "long" || normalized == "double" || normalized == "float" || normalized == "decimal";
+    }
+
+    private static string NormalizeType(string type)
+    {
+        return type.Replace("?", "").Replace("System.", "").Trim().ToLowerInvariant();
+    }
+
+    private static string SanitizeIdentifier(string value)
+    {
+        var chars = value.Where(char.IsLetterOrDigit).ToArray();
+        return chars.Length == 0 ? "GeneratedIntent" : new string(chars);
+    }
+
+    private static string LowerFirst(string value)
+    {
+        if (string.IsNullOrEmpty(value)) return value;
+        return char.ToLowerInvariant(value[0]) + value.Substring(1);
+    }
+
+    private static string SplitWords(string value)
+    {
+        return Regex.Replace(value, "([a-z])([A-Z])", "$1 $2");
+    }
+
+    private static string EscapeSwift(string value)
+    {
+        return (value ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
+    }
+
+    private static string EscapeCSharp(string value)
+    {
+        return (value ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
+    }
+
+    private static string EscapeBash(string value)
+    {
+        return (value ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
+    }
+
+    private static string FirstString(string args)
+    {
+        var match = Regex.Match(args ?? "", "\"(?<v>(?:\\\\.|[^\"])*)\"");
+        return match.Success ? match.Groups["v"].Value.Replace("\\\"", "\"") : null;
+    }
+
+    private static string NamedString(string args, string name)
+    {
+        var match = Regex.Match(args ?? "", name + "\\s*=\\s*\"(?<v>(?:\\\\.|[^\"])*)\"");
+        return match.Success ? match.Groups["v"].Value.Replace("\\\"", "\"") : null;
+    }
+
+    private static bool? NamedBool(string args, string name)
+    {
+        var match = Regex.Match(args ?? "", name + "\\s*=\\s*(?<v>true|false)", RegexOptions.IgnoreCase);
+        return match.Success ? bool.Parse(match.Groups["v"].Value) : (bool?)null;
+    }
+
+    private static double? NamedDouble(string args, string name)
+    {
+        var match = Regex.Match(args ?? "", name + "\\s*=\\s*(?<v>-?[0-9]+(?:\\.[0-9]+)?)");
+        if (match.Success && double.TryParse(match.Groups["v"].Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value))
+        {
+            return value;
+        }
+        return null;
+    }
+}
+]]></Code>
+    </Task>
+  </UsingTask>
+
+  <ItemGroup Condition="'$(_MauiAppIntentsShouldBuild)' == 'true'">
+    <_MauiAppIntentsCompileSource Include="@(Compile)" />
+    <Compile Remove="$(_MauiAppIntentsGeneratedRegistration)" Condition="Exists('$(_MauiAppIntentsGeneratedRegistration)')" />
+    <Compile Remove="$(_MauiAppIntentsGeneratedNativeBinding)" Condition="Exists('$(_MauiAppIntentsGeneratedNativeBinding)')" />
+    <Compile Include="$(_MauiAppIntentsGeneratedRegistration)" Visible="false" Condition="Exists('$(_MauiAppIntentsGeneratedRegistration)')" />
+    <Compile Include="$(_MauiAppIntentsGeneratedNativeBinding)" Visible="false" Condition="Exists('$(_MauiAppIntentsGeneratedNativeBinding)')" />
+  </ItemGroup>
+
+  <Target Name="_GenerateMauiAppIntentsFiles"
+          BeforeTargets="CoreCompile"
+          Condition="'$(_MauiAppIntentsShouldBuild)' == 'true'"
+          Inputs="@(_MauiAppIntentsCompileSource);$(MSBuildProjectFullPath)"
+          Outputs="$(_MauiAppIntentsGeneratedSwift);$(_MauiAppIntentsGeneratedRegistration);$(_MauiAppIntentsGeneratedNativeBinding)">
+    <GenerateMauiAppIntentsFiles
+      Sources="@(_MauiAppIntentsCompileSource)"
+      OutputDirectory="$(_MauiAppIntentsPackageDir)"
+      ManagedOutputFile="$(_MauiAppIntentsGeneratedRegistration)"
+      NativeBindingOutputFile="$(_MauiAppIntentsGeneratedNativeBinding)"
+      ModuleName="$(MauiAppIntentsModuleName)"
+      MinimumOSVersion="$(MauiAppIntentsMinimumOSVersion)"
+      ArchivePlatforms="$(MauiAppIntentsArchivePlatforms)">
+      <Output TaskParameter="HasIntents" PropertyName="_MauiAppIntentsHasIntents" />
+    </GenerateMauiAppIntentsFiles>
+    <ItemGroup Condition="'$(_MauiAppIntentsHasIntents)' == 'true'">
+      <Compile Remove="$(_MauiAppIntentsGeneratedRegistration)" />
+      <Compile Remove="$(_MauiAppIntentsGeneratedNativeBinding)" />
+      <Compile Include="$(_MauiAppIntentsGeneratedRegistration)" Visible="false" />
+      <Compile Include="$(_MauiAppIntentsGeneratedNativeBinding)" Visible="false" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="_BuildMauiAppIntentsNative"
+          DependsOnTargets="_GenerateMauiAppIntentsFiles"
+          Condition="'$(_MauiAppIntentsShouldBuild)' == 'true' and Exists('$(_MauiAppIntentsGeneratedSwift)')"
+          Inputs="$(_MauiAppIntentsPackageDir)Package.swift;$(_MauiAppIntentsGeneratedSwift);$(_MauiAppIntentsPackageDir)Sources/$(MauiAppIntentsModuleName)/Runtime/MauiAppIntentsRuntime.swift"
+          Outputs="$(_MauiAppIntentsBuildStamp)">
+    <Exec Command="&quot;$(_MauiAppIntentsPackageDir)build-appintents.sh&quot;"
+          EnvironmentVariables="CONFIGURATION=$(Configuration);BUILD_DIR=$(_MauiAppIntentsOutputDir);ARCHIVE_PLATFORMS=$(MauiAppIntentsArchivePlatforms)" />
+  </Target>
+
+  <Target Name="_RegisterMauiAppIntentsNativeReference"
+          BeforeTargets="_ExpandNativeReferences;ResolveNativeReferences"
+          DependsOnTargets="_BuildMauiAppIntentsNative"
+          Condition="'$(_MauiAppIntentsShouldBuild)' == 'true' and Exists('$(_MauiAppIntentsXcframework)')">
+    <ItemGroup>
+      <NativeReference Include="$(_MauiAppIntentsXcframework)"
+                       Kind="Framework"
+                       ForceLoad="$(MauiAppIntentsForceLoad)"
+                       SmartLink="$(MauiAppIntentsSmartLink)"
+                       LinkWithSwiftSystemLibraries="true" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="_CopyMauiAppIntentsMetadata"
+          AfterTargets="_CopyResourcesToBundle"
+          Condition="'$(_MauiAppIntentsShouldBuild)' == 'true' and Exists('$(_MauiAppIntentsMetadataDir)')"
+          Inputs="$(_MauiAppIntentsMetadataDir)/**/*"
+          Outputs="$(AppBundleDir)/Metadata.appintents/version.json">
+    <ItemGroup>
+      <_MauiAppIntentsMetadata Include="$(_MauiAppIntentsMetadataDir)/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_MauiAppIntentsMetadata)"
+          DestinationFolder="$(AppBundleDir)/Metadata.appintents/%(RecursiveDir)" />
+  </Target>
+</Project>
