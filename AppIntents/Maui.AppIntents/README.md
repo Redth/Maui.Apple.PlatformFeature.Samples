@@ -96,6 +96,8 @@ The current vertical slice has been validated with the sample app on an iPhone 1
 - The generated framework exports `MauiAppIntentBridgeSetDispatcher`.
 - On launch, logs include `[AppIntents] Generated bridge wired up successfully.`
 - The simulator indexes the generated shortcut phrase in the app's custom vocabulary, e.g. `Create a generated task in TaskTracker`.
+- Tapping the generated App Shortcut tile in Shortcuts, entering `Test`, invokes the generated SwiftPM `AppIntent` and reaches the C# handler. Simulator logs include `[AppIntents] Generated handler invoked: Test`, and the MAUI app shows the created `Test` task.
+- `shortcuts://run-shortcut?...` and `/usr/bin/shortcuts run ...` target user-authored Shortcuts by name; in this simulator they do not directly invoke App Shortcuts generated from `AppShortcutsProvider`.
 
 ## Current v1 scope
 

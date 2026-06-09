@@ -209,6 +209,8 @@ Simulator validation has confirmed:
 - the generated bundle validation target passes before codesigning
 - startup logs include `[AppIntents] Generated bridge wired up successfully.`
 - iOS indexes the generated shortcut phrase as `Create a generated task in TaskTracker`
+- manual simulator execution works: tapping the generated "Create Generated Task" tile in Shortcuts, entering `Test`, invokes the generated SwiftPM `AppIntent`, reaches the C# handler (`[AppIntents] Generated handler invoked: Test`), and creates the `Test` task in the MAUI app
+- `shortcuts://run-shortcut?...` and `/usr/bin/shortcuts run ...` look for user-authored shortcut files in this simulator; they do not directly invoke App Shortcuts from `AppShortcutsProvider`
 
 ### How the Build Works
 

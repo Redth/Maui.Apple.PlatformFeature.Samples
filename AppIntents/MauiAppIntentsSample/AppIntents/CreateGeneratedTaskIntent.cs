@@ -25,6 +25,8 @@ public sealed class CreateGeneratedTaskIntent : IAppIntentHandler<CreateGenerate
 
     public Task<AppIntentResponse> HandleAsync(Request request, CancellationToken cancellationToken)
     {
+        Console.WriteLine($"[AppIntents] Generated handler invoked: {request.Title}");
+
         if (string.IsNullOrWhiteSpace(request.Title))
         {
             return Task.FromResult(AppIntentResponse.Failed("A task title is required."));
