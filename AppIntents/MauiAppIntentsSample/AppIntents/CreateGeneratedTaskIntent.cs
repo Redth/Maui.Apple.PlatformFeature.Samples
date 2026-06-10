@@ -10,7 +10,7 @@ namespace MauiAppIntentsSample.AppIntents;
 [AppShortcut("Create a generated task in ${applicationName}",
     ShortTitle = "Create Generated Task",
     SystemImageName = "sparkles")]
-public sealed class CreateGeneratedTaskIntent : IAppIntentHandler<CreateGeneratedTaskIntent.Request>
+public sealed class CreateGeneratedTaskIntent : IAppIntentHandler<CreateGeneratedTaskIntent.Request, AppEntityReference<TaskItem>>
 {
     private readonly ITaskService taskService;
 
@@ -21,25 +21,38 @@ public sealed class CreateGeneratedTaskIntent : IAppIntentHandler<CreateGenerate
 
     public sealed record Request(
         [property: IntentParameter("Title")] string Title,
-        [property: IntentParameter("Estimated Minutes", IsOptional = true)] int? EstimatedMinutes);
+        [property: IntentParameter("Estimated Minutes", IsOptional = true)] int? EstimatedMinutes,
+        [property: IntentParameter("Priority", IsOptional = true)] TaskPriorityLevel? Priority,
+        [property: IntentParameter("Category", IsOptional = true)] TaskCategoryType? Category);
 
-    public Task<AppIntentResponse> HandleAsync(Request request, CancellationToken cancellationToken)
+    public Task<AppIntentResponse<AppEntityReference<TaskItem>>> HandleAsync(Request request, CancellationToken cancellationToken)
     {
         Console.WriteLine($"[AppIntents] Generated handler invoked: {request.Title}");
 
         if (string.IsNullOrWhiteSpace(request.Title))
         {
-            return Task.FromResult(AppIntentResponse.Failed("A task title is required."));
+            return Task.FromResult(AppIntentResponse<AppEntityReference<TaskItem>>.Failed("A task title is required."));
         }
 
         var task = taskService.Create(
             request.Title.Trim(),
-            TaskPriorityLevel.Medium,
-            TaskCategoryType.Personal,
+            request.Priority ?? TaskPriorityLevel.Medium,
+            request.Category ?? TaskCategoryType.Personal,
             estimatedMinutes: request.EstimatedMinutes,
             notes: "Created by the generated MAUI App Intents bridge.");
 
-        return Task.FromResult(AppIntentResponse.Succeeded(
+        return Task.FromResult(AppIntentResponse<AppEntityReference<TaskItem>>.Succeeded(
+            ToReference(task),
             $"Created '{task.Title}' with the generated App Intents bridge."));
+    }
+
+    private static AppEntityReference<TaskItem> ToReference(TaskItem task)
+    {
+        return new AppEntityReference<TaskItem>
+        {
+            Id = task.Id,
+            Display = task.Title,
+            Subtitle = task.Notes
+        };
     }
 }

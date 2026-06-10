@@ -4,6 +4,7 @@
     <Project Path="MauiAppIntentsSample.Binding/MauiAppIntentsSample.Binding.csproj" />
   </Folder>
   <Folder Name="/Packages/">
+    <Project Path="Maui.AppIntents.Generator.Tests/Maui.AppIntents.Generator.Tests.csproj" />
     <Project Path="Maui.AppIntents/Maui.AppIntents.csproj" />
   </Folder>
 </Solution>

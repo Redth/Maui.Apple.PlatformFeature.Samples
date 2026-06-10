@@ -1,4 +1,5 @@
 using Foundation;
+using Maui.AppIntents;
 using MauiAppIntentsSample.Binding;
 using MauiAppIntentsSample.Models;
 using MauiAppIntentsSample.Services;
@@ -22,6 +23,15 @@ public class IntentDonationService : IIntentDonationService
                 task.DueDate.HasValue ? (NSDate)task.DueDate.Value : null,
                 task.EstimatedMinutes.HasValue ? (nint)task.EstimatedMinutes.Value : -1,
                 task.Notes ?? "");
+#if MAUI_APPINTENTS
+            MauiAppIntentsNative.Donate("CreateGeneratedTaskIntent", new
+            {
+                title = task.Title,
+                estimatedMinutes = task.EstimatedMinutes,
+                priority = (int)task.Priority,
+                category = (int)task.Category
+            });
+#endif
         }
         catch (Exception ex)
         {
@@ -34,6 +44,12 @@ public class IntentDonationService : IIntentDonationService
         try
         {
             IntentDonationBridge.Shared.DonateCompleteTask(task.Id, task.Title);
+#if MAUI_APPINTENTS
+            MauiAppIntentsNative.Donate("CompleteGeneratedTaskIntent", new
+            {
+                task = ToGeneratedReference(task)
+            });
+#endif
         }
         catch (Exception ex)
         {
@@ -91,5 +107,15 @@ public class IntentDonationService : IIntentDonationService
         {
             Console.WriteLine($"[AppIntents] Failed to delete donations: {ex.Message}");
         }
+    }
+
+    private static object ToGeneratedReference(TaskItem task)
+    {
+        return new
+        {
+            id = task.Id,
+            display = task.Title,
+            subtitle = task.Notes
+        };
     }
 }

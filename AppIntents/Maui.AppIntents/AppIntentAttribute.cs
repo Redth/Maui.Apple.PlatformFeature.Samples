@@ -68,6 +68,45 @@ public sealed class AppEntityAttribute : Attribute
     public string? TypeDisplayName { get; set; }
 }
 
+[AttributeUsage(AttributeTargets.Property, AllowMultiple = false, Inherited = false)]
+public sealed class AppEntityIdentifierAttribute : Attribute
+{
+}
+
+[AttributeUsage(AttributeTargets.Property, AllowMultiple = false, Inherited = false)]
+public sealed class AppEntityDisplayAttribute : Attribute
+{
+}
+
+[AttributeUsage(AttributeTargets.Property, AllowMultiple = false, Inherited = false)]
+public sealed class AppEntitySubtitleAttribute : Attribute
+{
+}
+
+[AttributeUsage(AttributeTargets.Property, AllowMultiple = false, Inherited = false)]
+public sealed class AppEntityPropertyAttribute : Attribute
+{
+    public AppEntityPropertyAttribute(string title)
+    {
+        Title = title;
+    }
+
+    public string Title { get; }
+
+    public string? Name { get; set; }
+}
+
+[AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+public sealed class AppEntityQueryHandlerAttribute : Attribute
+{
+    public AppEntityQueryHandlerAttribute(Type entityType)
+    {
+        EntityType = entityType;
+    }
+
+    public Type EntityType { get; }
+}
+
 [AttributeUsage(AttributeTargets.Enum, AllowMultiple = false, Inherited = false)]
 public sealed class AppEnumAttribute : Attribute
 {

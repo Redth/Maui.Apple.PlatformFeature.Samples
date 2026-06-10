@@ -1,302 +1,335 @@
 ---
 name: maui-ios-appintents
 description: >
-  Add Apple Siri App Intents to .NET MAUI iOS apps — the complete architecture, Swift framework,
-  binding library, and C# bridge pattern. Use this skill whenever someone wants to integrate Siri,
-  Shortcuts, or App Intents with a .NET MAUI app, add voice commands to a MAUI iOS app, create
-  AppIntent/AppEntity/AppEnum types for a MAUI project, build a Swift xcframework for native
-  interop with MAUI, or set up the @objc bridge between Swift and C# for App Intents. Also use
-  when someone asks about making their MAUI app work with Siri, Apple Intelligence, Spotlight
-  integration, or the iOS Shortcuts app. Even if the user just mentions "Siri" or "voice shortcuts"
-  in the context of a .NET MAUI or Xamarin iOS app, this skill applies.
+  Add Apple Siri App Intents to .NET MAUI iOS apps. Prefer the generated C#-first
+  Maui.AppIntents package path: C# attributes, Roslyn semantic discovery, generated
+  SwiftPM declarations, generated xcframework, and Metadata.appintents bundle validation.
+  Use this skill whenever someone wants Siri, Shortcuts, App Intents, AppEntity,
+  AppEnum, App Shortcuts, Spotlight, Apple Intelligence actions, or voice commands
+  in a .NET MAUI or Xamarin iOS app. Also use it for the legacy manual Swift
+  framework + binding-library bridge when the generated package does not yet cover
+  the requested App Intents feature.
 ---
 
-# .NET MAUI + iOS App Intents Integration
+# .NET MAUI + iOS App Intents
 
-This skill guides the implementation of Apple App Intents (Siri, Shortcuts, Spotlight) in .NET MAUI iOS apps. It covers the complete architecture from Swift intent definitions through the @objc bridge to C# business logic.
+Use the generated `Maui.AppIntents` path first. It lets app developers author intents, enums, entities, and query handlers in C# while the build generates the Swift declarations Apple needs for App Intents metadata extraction.
 
-## Table of Contents
-1. [Why This Architecture](#why-this-architecture)
-2. [Solution Structure](#solution-structure)
-3. [Implementation Workflow](#implementation-workflow)
-4. [Critical Gotchas](#critical-gotchas)
-5. [Reference Files](#reference-files)
-6. [Completion Checklist](#completion-checklist)
+The older manual Swift framework + .NET iOS binding approach remains useful as a fallback for advanced features that are not generated yet, but it should not be the default recommendation in this repository.
 
----
-
-## Why This Architecture
-
-App Intents are **Swift-only** — no way around this. Three things make it impossible to define them in C#:
-
-1. **Compile-time metadata extraction**: Xcode's `appintentsmetadataprocessor` scans compiled Swift binaries for types conforming to `AppIntent`, `AppEntity`, `AppEnum` and generates a `Metadata.appintents` directory. iOS reads this at install time to discover what intents the app offers. Without it, Siri will never see the intents.
-
-2. **Swift-specific constructs**: `@Parameter` property wrappers, `@Property` annotations, `@AppShortcutsBuilder` result builders, and protocol conformance (`AppIntent`, `AppEntity`, `AppEnum`, `AppShortcutsProvider`) have no C# equivalents.
-
-3. **Protocol requirements**: These protocols require specific static properties (`title`, `typeDisplayRepresentation`, `caseDisplayRepresentations`) and methods (`perform()`, `entities(for:)`) that must be compiled by the Swift compiler.
-
-**The good news**: Only the *intent declarations* need to be Swift. All business logic, data storage, UI, and app architecture stay in C#. The Swift layer is a thin declaration shell that delegates to C# via an @objc bridge.
-
-The architecture uses three projects:
+## Architecture to prefer
 
 ```
-┌─────────────────────────────────┐
-│  .NET MAUI App (C#)             │  Business logic, UI, data, services
-│  └─ Platforms/iOS/              │  Bridge implementation (C# → Swift)
-│     └─ AppIntentsBridge.cs      │  Implements Swift protocol in C#
-├─────────────────────────────────┤
-│  .NET iOS Binding Library       │  ApiDefinition.cs maps @objc types → C#
-│  └─ <XcodeProject> item        │  Auto-builds xcframework from Xcode project
-├─────────────────────────────────┤
-│  Xcode Framework Project        │  App Intents definitions + @objc bridge
-│  └─ Sources/                    │  AppIntent, AppEntity, AppEnum, etc.
-└─────────────────────────────────┘
+.NET MAUI app
+  C# [AppIntent] handlers
+  C# [AppEnum] enums
+  C# [AppEntity] models
+  C# IAppEntityQueryHandler<TEntity>
+        |
+        v
+Roslyn incremental generator
+  emits managed registration and native bridge glue
+  embeds JSON manifest in assembly metadata
+        |
+        v
+Compiled MSBuild task after CoreCompile
+  reads manifest from intermediate assembly
+  writes SwiftPM package under obj/
+  emits AppIntent/AppEnum/AppEntity/EntityStringQuery/AppShortcutsProvider
+        |
+        v
+xcodebuild archive from Package.swift
+  produces xcframework + Metadata.appintents
+        |
+        v
+MAUI build
+  adds NativeReference before _ExpandNativeReferences
+  copies Metadata.appintents into .app before codesigning
+  validates metadata, framework, bridge symbols, phrases, enums, entities, properties
 ```
 
-The binding project uses **[Native Library Interop](https://learn.microsoft.com/en-us/dotnet/communitytoolkit/maui/native-library-interop/)** (`<XcodeProject>` MSBuild item) from the .NET iOS SDK. This means `dotnet build` automatically: builds the Xcode project → creates xcarchive → creates xcframework → links it as a NativeReference. No shell scripts or Makefile needed.
+This still uses Swift and Xcode internally because iOS discovers intents from compile-time Swift metadata. The win is that the app developer does not maintain Swift code, a generated `.xcodeproj`, or binding definitions for the generated path.
 
-**Data flow when Siri invokes an intent:**
+## Generated path workflow
 
-1. User speaks → iOS matches phrase from `AppShortcutsProvider`
-2. iOS calls Swift `perform()` on the matched `AppIntent`
-3. Swift calls `TaskBridgeManager.shared.provider.someMethod(...)` — an @objc protocol
-4. The C# binding routes this to the C# class implementing the protocol
-5. C# executes business logic, returns result
-6. Swift wraps result as `IntentResult` with dialog → Siri speaks response
+### 1. Enable the package
 
-This is **in-process** communication — the framework is loaded into the MAUI app's process. No IPC, no serialization overhead, no App Group needed for basic data access.
+In the MAUI app project:
 
----
-
-## Solution Structure
-
-For a project called `{AppName}`, create this layout:
-
-```
-{AppName}/
-├── {AppName}.slnx
-├── src/
-│   ├── {AppName}/                          # .NET MAUI App
-│   │   ├── {AppName}.csproj
-│   │   ├── Models/                         # C# data models
-│   │   ├── Services/                       # Business logic interfaces + implementations
-│   │   ├── Platforms/iOS/
-│   │   │   ├── AppDelegate.cs              # Wire up bridge in FinishedLaunching
-│   │   │   ├── AppIntentsBridge.cs         # C# class implementing Swift protocol
-│   │   │   └── Entitlements.plist          # Siri + App Group entitlements
-│   │   └── ...
-│   │
-│   ├── {AppName}.AppIntents/               # Xcode Framework Project
-│   │   ├── {FrameworkName}.xcodeproj       # Xcode project (auto-built by MSBuild)
-│   │   └── Sources/
-│   │       ├── Bridge/
-│   │       │   ├── BridgeModels.swift       # @objc DTO classes
-│   │       │   └── DataBridge.swift         # @objc protocol + manager singleton
-│   │       ├── Enums/                       # AppEnum types
-│   │       ├── Entities/                    # AppEntity + EntityQuery types
-│   │       ├── Intents/                     # AppIntent implementations
-│   │       │   └── IntentError.swift        # Error enum
-│   │       └── Shortcuts/
-│   │           └── AppShortcuts.swift        # AppShortcutsProvider
-│   │
-│   └── {AppName}.Binding/                  # .NET iOS Binding Library
-│       ├── {AppName}.Binding.csproj        # <XcodeProject> auto-builds xcframework
-│       ├── ApiDefinition.cs                # ObjC → C# type mapping
-│       └── StructsAndEnums.cs
-```
-
----
-
-## Implementation Workflow
-
-Work through these steps in order. Read the referenced files for code patterns.
-
-### Step 1: Design the Data Model and Intents
-
-Before writing any code, decide:
-- **What C# data types** will be exposed as AppEntities? (e.g., a `TaskItem`, `Recipe`, `Contact`)
-- **What enums** will be exposed as AppEnums? (e.g., Priority, Category, Status)
-- **What actions** will users perform via Siri? Each becomes an AppIntent.
-- **What parameter types** does each intent need? Supported: `String`, `Int`, `Double`, `Bool`, `Date`, `AppEnum`, `AppEntity`, and optional variants of all.
-
-**Intent coverage**: Even if the user mentions only 1-2 actions, consider the standard set of intents that most apps benefit from. Create at least 3 intents from this menu:
-- **Create** — Add a new item (most common starting point)
-- **Open** — Navigate to an item in the app (`openAppWhenRun = true`)
-- **Complete/Toggle** — Change a boolean state (e.g., mark done)
-- **List/Filter** — Show filtered results with optional enum/bool filters
-- **Search** — Find items by text query
-- **Update Field** — Change a specific field (e.g., set due date)
-
-Suggest intents that make sense for the domain, even if the user didn't explicitly list them.
-
-### Step 2: Build the C# App Foundation
-
-Create the MAUI project with models, services, and UI. The service layer should have an interface (e.g., `ITaskService`) with CRUD + query methods — this is what the bridge will call. Register it as a singleton in DI.
-
-If this is an existing app, identify the service interface to expose and ensure it's registered as a singleton.
-
-### Step 3: Create the Xcode Framework Project
-
-Read `references/swift-patterns.md` for complete code patterns.
-
-Create an Xcode Framework project (`.xcodeproj`) targeting iOS 17+. Set these build settings in the Xcode project:
-- `SWIFT_REFLECTION_METADATA_LEVEL = all` (critical for App Intents metadata)
-- `SWIFT_INSTALL_OBJC_HEADER = YES`
-- Link the `AppIntents` framework
-
-Then implement in this order:
-
-1. **Bridge layer** (`Sources/Bridge/`) — `@objc` DTO class + protocol + manager singleton. This is the API surface between Swift and C#. Critical rules:
-   - Use `@objc(ClassName)` syntax to set explicit ObjC class names (prevents Swift name mangling)
-   - Use `Int` raw values for enums (not Swift enums directly)
-   - Use sentinel values for optional value types (`-1` for "nil int", empty string for "nil string")
-   - Only `NSObject` subclasses and `@objc` protocols cross the bridge
-
-2. **AppEnums** (`Sources/Enums/`) — Each Swift `AppEnum` maps to a C# enum via raw `Int` values.
-
-3. **AppEntity + EntityQuery** (`Sources/Entities/`) — The entity wraps bridge DTOs. The query calls the bridge protocol to fetch data.
-
-4. **AppIntents** (`Sources/Intents/`) — Each intent's `perform()` calls `BridgeManager.shared.provider.someMethod(...)`. Include an `IntentError` enum. For intents with predictable parameter patterns, also conform to `PredictableIntent` and provide a `predictionConfiguration`.
-
-5. **AppShortcutsProvider** (`Sources/Shortcuts/`) — Define Siri phrases. Always include `\(.applicationName)` in phrases.
-
-6. **IntentDonationBridge** (`Sources/Bridge/`) — `@objc` class with a `shared` singleton that wraps `IntentDonationManager.shared.donate(intent:)`. For each intent type, provide a method (e.g., `donateCreateTask(title:...)`) that creates the intent, populates parameters, and donates it. Also provide `deleteTaskDonations(taskId:)` using `IntentDonationManager.shared.deleteDonations(matching:)`. This is how C# tells the system about user actions performed in the MAUI UI.
-
-### Step 4: Create the .NET iOS Binding Library with `<XcodeProject>`
-
-Read `references/csharp-binding.md` for complete ApiDefinition.cs patterns.
-
-1. Create project: `dotnet new iosbinding`
-2. Replace any `<NativeReference>` with an `<XcodeProject>` item pointing to the `.xcodeproj`:
-   ```xml
-   <XcodeProject Include="../{AppName}.AppIntents/{FrameworkName}.xcodeproj">
-     <SchemeName>{FrameworkName}</SchemeName>
-     <ForceLoad>true</ForceLoad>
-     <SmartLink>false</SmartLink>
-   </XcodeProject>
-   ```
-   This automatically builds the xcframework during `dotnet build` — no shell scripts needed.
-3. Add a custom MSBuild target `ExtractAppIntentsMetadata` that finds and copies `Metadata.appintents` from the xcarchive output (see `references/build-integration.md`)
-4. Write `ApiDefinition.cs` mapping every @objc type from the bridge layer — including the `IntentDonationBridge` singleton
-5. The `[Protocol, Model]` on the bridge protocol auto-generates `I{ProtocolName}` interface
-
-### Step 5: Wire the Bridge in the MAUI App
-
-Read `references/csharp-binding.md` (bridge implementation section).
-
-1. Create `AppIntentsBridgeProvider.cs` in `Platforms/iOS/` — a C# class that inherits the generated protocol Model class and delegates to your service
-2. Create `IIntentDonationService` interface and `IntentDonationService` iOS implementation that wraps the `IntentDonationBridge` binding. Call donation methods from ViewModels when users create/complete/open tasks.
-3. In `AppDelegate.FinishedLaunching`, get the service from DI, create the bridge provider, set it on the manager singleton
-4. Add MSBuild target `CopyAppIntentsMetadata` to copy `Metadata.appintents` from the binding project's intermediate output into the app bundle
-5. Add `Entitlements.plist` with Siri entitlement (and optionally App Group)
-
-### Step 6: Build and Test
-
-1. Build everything with a single command: `dotnet build -f net10.0-ios`
-   (This builds the Xcode project → xcframework → binding → MAUI app automatically)
-2. **Simulator testing** (fastest verification loop):
-   - Build without code signing: `dotnet build -f net10.0-ios -r iossimulator-arm64 -p:CodesignEntitlements=""`
-   - Install: `xcrun simctl install booted /path/to/{AppName}.app`
-   - Launch: `xcrun simctl launch booted {bundle-id}`
-   - Open Shortcuts app → verify intents appear under your app name
-   - Tap a shortcut to confirm the Swift→C# bridge executes correctly
-   - Check console for `[AppIntents] Bridge wired up successfully.`
-4. **Device testing** (for Siri voice):
-   - Deploy to iOS 17+ device with Siri entitlement in provisioning profile
-   - Open app once (registers shortcuts)
-   - Test with Siri or Shortcuts app
-
----
-
-## Critical Gotchas
-
-These are real issues discovered during implementation — not theoretical concerns:
-
-### 1. `@objc(ClassName)` is REQUIRED
-Without explicit `@objc(ClassName)`, Swift mangles class names. Instead of `BridgeTaskItem`, the linker sees `_TtC27MauiAppIntentsSampleIntents14BridgeTaskItem`. The .NET binding expects the clean name → undefined symbol errors at link time.
-
-**Always write:**
-```swift
-@objc(BridgeTaskItem) public class BridgeTaskItem: NSObject { ... }
-@objc(MyBridgeManager) public class MyBridgeManager: NSObject { ... }
-@objc(MyDataProvider) public protocol MyDataProvider: AnyObject { ... }
-```
-
-### 2. No Nullable Value Types Across the Bridge
-ObjC doesn't have optional `Int?` or `Bool?`. Use sentinel values:
-- `Int` → use `-1` for nil
-- `String` → use empty string `""` for nil
-- `Date?` is fine (it's a reference type in ObjC)
-- `Bool` → can't be optional, use a separate flag or always provide a value
-
-### 3. Binding Project Nullable Syntax
-In `ApiDefinition.cs`, don't use C# nullable reference type annotations (`?`). Use `[NullAllowed]` attribute instead. The binding code generator doesn't support `#nullable` context.
-
-### 4. Metadata Must Be in the App Bundle
-The `Metadata.appintents` directory must end up in the final `.app` bundle or iOS won't discover the intents. The MSBuild `CopyAppIntentsMetadata` target handles this. If intents don't appear in Siri/Shortcuts, check the app bundle for this directory first.
-
-### 5. Xcode Project Build Settings
-The Xcode project must have `SWIFT_REFLECTION_METADATA_LEVEL = all` in its build settings. Without this, `appintentsmetadataprocessor` can't find AppIntent types and `Metadata.appintents` will be empty. The `<XcodeProject>` MSBuild integration already passes `BUILD_LIBRARY_FOR_DISTRIBUTION=YES` automatically.
-
-### 6. Build Order is Automatic
-With `<XcodeProject>`, the build order is handled by MSBuild: Xcode project → xcframework → binding → MAUI app. Just run `dotnet build` and everything builds in the correct order.
-
-### 7. Simulator Testing Works (but Siri Voice is Limited)
-App Intents **do register and execute** on the iOS Simulator. You can verify intent registration in the Shortcuts app, tap shortcuts to run them, and confirm the full Swift→@objc→C# bridge pipeline works. However, Siri voice interaction has limited functionality on the simulator — use a physical iOS 17+ device for voice testing.
-
-### 8. `$(AppBundleDir)` Path Separator
-The MSBuild property `$(AppBundleDir)` may or may not end with a trailing `/`. Always write `$(AppBundleDir)/Metadata.appintents` (with explicit `/`), never `$(AppBundleDir)Metadata.appintents`. Without the separator, the copy destination becomes `MyApp.appMetadata.appintents` — outside the bundle — and iOS won't find the intents.
-
-### 9. Intent Donation is Fire-and-Forget
-Intent donation (`IntentDonationManager.shared.donate`) is async and can fail silently. Wrap donation calls in try/catch and log failures, but never let them crash the app. The donation is a hint to the system, not a critical operation. Also: **only donate when the user acts in your app's UI** — Siri/Shortcuts donations are handled automatically by the system.
-
-### 10. Siri Entitlement Required for Voice Activation
-Without `com.apple.developer.siri` in `Entitlements.plist`, **Siri will not invoke your intents** — even though they work perfectly in the Shortcuts app. This is the most common "intents work in Shortcuts but not Siri" issue. Ensure your `Entitlements.plist` includes:
 ```xml
-<key>com.apple.developer.siri</key>
-<true/>
+<ItemGroup>
+  <PackageReference Include="Maui.AppIntents" Version="0.1.0-preview" />
+</ItemGroup>
+
+<PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
+  <MauiAppIntentsEnabled>true</MauiAppIntentsEnabled>
+</PropertyGroup>
 ```
-**Symptom**: Intents appear and execute correctly in the Shortcuts app, but Siri voice activation silently fails — no error, no response, Siri acts as if the intent doesn't exist.
 
-### 11. Provisioning Profile Must Include Siri Capability
-**Wildcard provisioning profiles do not include the Siri capability.** You need a dedicated (non-wildcard) provisioning profile for your specific bundle ID with Siri enabled. Without it, the app will build, deploy, and code-sign successfully, but Siri still won't see your intents.
+For local repository work, use the project-reference pattern already in the sample and import `Maui.AppIntents/buildTransitive/Maui.AppIntents.props` and `.targets`.
 
-To fix this, create a dedicated provisioning profile for your bundle ID with Siri enabled. You can do this through the Apple Developer Portal, Xcode automatic signing (recommended), or provisioning tooling such as Maui.Sherpa.
-**Symptom**: Everything builds and deploys without errors, intents work in Shortcuts, but Siri voice activation fails — identical to a missing entitlement, but the entitlement is present.
+### 2. Create C# intent handlers
 
----
+Each generated intent is a DI-created class implementing `IAppIntentHandler<TRequest>`. Use `IAppIntentHandler<TRequest, TResult>` when the intent returns a value to Shortcuts.
 
-## Reference Files
+```csharp
+[AppIntent("CreateTaskIntent",
+    Title = "Create Task",
+    Description = "Creates a new task")]
+[AppShortcut("Create a task in ${applicationName}",
+    ShortTitle = "Create Task",
+    SystemImageName = "plus.circle")]
+public sealed class CreateTaskIntent
+    : IAppIntentHandler<CreateTaskIntent.Request, AppEntityReference<TaskItem>>
+{
+    private readonly ITaskService tasks;
 
-Read these for detailed code patterns and examples:
+    public CreateTaskIntent(ITaskService tasks)
+    {
+        this.tasks = tasks;
+    }
 
-| File | When to Read | Contents |
-|------|-------------|----------|
-| `references/swift-patterns.md` | When writing Swift code | Complete patterns for AppEnum, AppEntity, EntityQuery, AppIntent, AppShortcutsProvider, bridge DTOs, bridge protocol, PredictableIntent, IntentDonationBridge, error enum |
-| `references/csharp-binding.md` | When writing C# binding + bridge | ApiDefinition.cs, binding csproj, bridge implementation in C#, IntentDonationBridge binding, IIntentDonationService, ViewModel integration, AppDelegate wiring |
-| `references/build-integration.md` | When setting up build pipeline | Xcode project setup, `<XcodeProject>` MSBuild item, metadata extraction, Makefile, troubleshooting |
+    public sealed record Request(
+        [property: IntentParameter("Title")] string Title,
+        [property: IntentParameter("Priority", IsOptional = true)] TaskPriorityLevel? Priority);
 
----
+    public Task<AppIntentResponse<AppEntityReference<TaskItem>>> HandleAsync(
+        Request request,
+        CancellationToken cancellationToken)
+    {
+        var task = tasks.Create(request.Title, request.Priority ?? TaskPriorityLevel.Medium);
+        return Task.FromResult(AppIntentResponse<AppEntityReference<TaskItem>>.Succeeded(
+            new AppEntityReference<TaskItem>
+            {
+                Id = task.Id,
+                Display = task.Title,
+                Subtitle = task.Notes
+            },
+            $"Created '{task.Title}'."));
+    }
+}
+```
 
-## Completion Checklist
+Supported generated parameter and result types today: `string`, integer numeric types, floating numeric types, `bool`, `DateTime`, `DateTimeOffset`, nullable variants, `[AppEnum]`, `AppEntityReference<TEntity>`, and collection shapes such as `IReadOnlyList<T>`, `List<T>`, and `T[]`.
 
-A successful implementation has ALL of these:
+### 3. Add AppEnum types
 
-- [ ] Xcode project compiles for both iOS device and simulator
-- [ ] `Metadata.appintents` directory exists in xcarchive output (contains `extract.actionsdata` and `version.json`)
-- [ ] `<XcodeProject>` item in binding .csproj builds xcframework automatically via `dotnet build`
-- [ ] `ExtractAppIntentsMetadata` target copies metadata from xcarchive to intermediate output
-- [ ] Binding project compiles (`dotnet build` succeeds)
-- [ ] MAUI app compiles end-to-end with single `dotnet build -f net{version}-ios` (no prior steps needed)
-- [ ] No "Undefined symbols" linker errors (confirms `@objc(ClassName)` is correct)
-- [ ] Framework appears in `{app}.app/Frameworks/` directory
-- [ ] `Metadata.appintents` is copied into the app bundle (via `CopyAppIntentsMetadata` target) — verify with `ls {app}.app/Metadata.appintents/`
-- [ ] Bridge is wired in `AppDelegate.FinishedLaunching` (log message confirms it)
-- [ ] Entitlements.plist includes `com.apple.developer.siri = true`
-- [ ] On simulator: intents appear in Shortcuts app under the app name
-- [ ] On simulator: tapping a shortcut executes successfully through the bridge
-- [ ] On device: Siri responds to registered phrases
-- [ ] `PredictableIntent` conformance on key intents (Create, Complete, List, Search)
-- [ ] `IntentDonationBridge` exposes donation methods to C# via binding
-- [ ] `IIntentDonationService` + iOS implementation wired in DI
-- [ ] ViewModels call donation service after user actions (create, complete, open)
+```csharp
+[AppEnum("Task Priority")]
+public enum TaskPriorityLevel
+{
+    [AppEnumCase("Low")]
+    Low = 0,
+
+    [AppEnumCase("Medium")]
+    Medium = 1,
+
+    [AppEnumCase("High")]
+    High = 2
+}
+```
+
+The generated Swift enum is `Int` backed and passes raw values through JSON so `System.Text.Json` can hydrate C# enum properties.
+
+### 4. Add AppEntity models and dynamic queries
+
+Annotate the C# model. Use explicit attributes or the conventions `Id`, `Title`/`Name`, and `Subtitle`/`Notes`.
+
+```csharp
+[AppEntity("TaskItem", TypeDisplayName = "Task")]
+public sealed class TaskItem
+{
+    [AppEntityIdentifier]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+
+    [AppEntityDisplay]
+    public string Title { get; set; } = "";
+
+    [AppEntitySubtitle]
+    public string? Notes { get; set; }
+
+    [AppEntityProperty("Priority")]
+    public TaskPriorityLevel Priority { get; set; }
+}
+```
+
+Add a DI query handler. This powers Shortcuts parameter pickers, lookup by stored IDs, Siri disambiguation, and suggested entities.
+
+```csharp
+[AppEntityQueryHandler(typeof(TaskItem))]
+public sealed class TaskItemQueryHandler : IAppEntityQueryHandler<TaskItem>
+{
+    private readonly ITaskService tasks;
+
+    public TaskItemQueryHandler(ITaskService tasks)
+    {
+        this.tasks = tasks;
+    }
+
+    public Task<IReadOnlyList<TaskItem>> GetEntitiesAsync(IReadOnlyList<string> ids, CancellationToken token)
+        => Task.FromResult<IReadOnlyList<TaskItem>>(ids.Select(tasks.GetById).OfType<TaskItem>().ToList());
+
+    public Task<IReadOnlyList<TaskItem>> SearchEntitiesAsync(string query, CancellationToken token)
+        => Task.FromResult(tasks.Search(query));
+
+    public Task<IReadOnlyList<TaskItem>> SuggestedEntitiesAsync(CancellationToken token)
+        => Task.FromResult(tasks.GetFiltered(showCompleted: false));
+}
+```
+
+Use the entity from intents through `AppEntityReference<TEntity>`:
+
+```csharp
+[AppIntent("CompleteTaskIntent", Title = "Complete Task")]
+[AppShortcut("Complete a task in ${applicationName}", ShortTitle = "Complete Task")]
+public sealed class CompleteTaskIntent : IAppIntentHandler<CompleteTaskIntent.Request>
+{
+    private readonly ITaskService tasks;
+
+    public CompleteTaskIntent(ITaskService tasks)
+    {
+        this.tasks = tasks;
+    }
+
+    public sealed record Request(
+        [property: IntentParameter("Task")] AppEntityReference<TaskItem> Task);
+
+    public Task<AppIntentResponse> HandleAsync(Request request, CancellationToken cancellationToken)
+    {
+        var task = tasks.GetById(request.Task.Id);
+        if (task is null)
+        {
+            return Task.FromResult(AppIntentResponse.Failed("The selected task could not be found."));
+        }
+
+        tasks.Complete(task.Id);
+        return Task.FromResult(AppIntentResponse.Succeeded($"Completed '{task.Title}'."));
+    }
+}
+```
+
+Do not deserialize selected entities as full app models. The generated Swift sends an entity reference payload (`id`, `display`, `subtitle`); the handler should re-fetch by ID from app services.
+
+For multi-select entity parameters, use collection references:
+
+```csharp
+[AppIntent("CompleteTasksIntent", Title = "Complete Tasks")]
+[AppShortcut("Complete tasks in ${applicationName}", ShortTitle = "Complete Tasks")]
+public sealed class CompleteTasksIntent : IAppIntentHandler<CompleteTasksIntent.Request, int>
+{
+    private readonly ITaskService tasks;
+
+    public CompleteTasksIntent(ITaskService tasks)
+    {
+        this.tasks = tasks;
+    }
+
+    public sealed record Request(
+        [property: IntentParameter("Tasks")] IReadOnlyList<AppEntityReference<TaskItem>> Tasks);
+
+    public Task<AppIntentResponse<int>> HandleAsync(Request request, CancellationToken cancellationToken)
+    {
+        var completed = request.Tasks.Count(task => tasks.Complete(task.Id));
+        return Task.FromResult(AppIntentResponse<int>.Succeeded(completed, $"Completed {completed} tasks."));
+    }
+}
+```
+
+### 5. Register services and wire native bridge
+
+```csharp
+builder.Services.AddSingleton<ITaskService, TaskService>();
+builder.Services.AddTransient<CreateTaskIntent>();
+builder.Services.AddTransient<CompleteTaskIntent>();
+builder.Services.AddTransient<TaskItemQueryHandler>();
+builder.Services.AddMauiAppIntents();
+```
+
+In iOS `AppDelegate.FinishedLaunching`, after `base.FinishedLaunching`:
+
+```csharp
+#if MAUI_APPINTENTS
+Maui.AppIntents.MauiAppIntentsNative.WireUp(IPlatformApplication.Current!.Services);
+#endif
+```
+
+Donate generated intents from iOS code after the bridge is wired:
+
+```csharp
+#if IOS && MAUI_APPINTENTS
+Maui.AppIntents.MauiAppIntentsNative.Donate("CompleteTaskIntent", new
+{
+    task = new
+    {
+        id = task.Id,
+        display = task.Title,
+        subtitle = task.Notes
+    }
+});
+#endif
+```
+
+### 6. Build and inspect outputs
+
+Simulator:
+
+```bash
+dotnet build MyApp.csproj -f net10.0-ios -r iossimulator-arm64 -p:CodesignEntitlements=
+```
+
+Device:
+
+```bash
+dotnet build MyApp.csproj -f net10.0-ios
+```
+
+Confirm the `.app` contains:
+
+```text
+Frameworks/<MauiAppIntentsModuleName>.framework/
+Metadata.appintents/extract.actionsdata
+Metadata.appintents/version.json
+```
+
+The validation target should fail the build if generated metadata, shortcut phrases, enum/entity/property names, the embedded framework, or the generated dispatcher/donation bridge symbols are missing.
+
+## Generated-path gotchas
+
+1. **Swift is still required internally.** Do not promise a no-Xcode toolchain story. The generated path removes user-authored Swift/Xcode assets, not Apple's Swift metadata extraction requirement.
+2. **Entity query handlers must be fast.** Query methods may be called by Shortcuts UI and Siri disambiguation. Use lightweight app-service calls and avoid long UI-thread work.
+3. **Entity query bridge failures return empty results.** Generated Swift catches bridge-not-ready and query errors for `EntityStringQuery` methods so parameter pickers degrade instead of throwing user-visible errors.
+4. **`AppEntityReference<TEntity>` is a reference, not a model.** Re-fetch by `Id` in handlers.
+5. **Generated diagnostics are intentional guardrails.** Fix `MAUIAI001`-`MAUIAI006` authoring diagnostics instead of suppressing them; they identify missing request types, unsupported parameter/result shapes, invalid identifiers, and handler/query mismatches.
+6. **Module names must be stable Swift identifiers.** Set `MauiAppIntentsModuleName` if the default project-derived name is not acceptable.
+7. **Metadata must be inside the app bundle.** If intents do not appear, inspect `{App}.app/Metadata.appintents/`.
+8. **Siri voice still needs entitlements/provisioning.** Shortcuts app execution can work while Siri voice fails if the app or provisioning profile lacks Siri capability.
+
+## When to use the manual Swift/binding fallback
+
+Use the legacy Swift framework + binding library pattern when the generated package does not yet support the feature the user needs, such as:
+
+- advanced result protocols not covered by generated `ReturnsValue<T>` value results
+- complex `ParameterSummary` or `PredictableIntent` configurations
+- app extensions or out-of-process execution models
+
+For manual fallback details, read:
+
+| File | Contents |
+| --- | --- |
+| `references/swift-patterns.md` | Swift `AppIntent`, `AppEntity`, `EntityQuery`, `AppEnum`, shortcut, donation, and bridge patterns |
+| `references/csharp-binding.md` | Binding library and C# bridge implementation patterns |
+| `references/build-integration.md` | `<XcodeProject>` build integration and metadata copy patterns |
+
+## Completion checklist for generated path
+
+- [ ] `MauiAppIntentsEnabled=true` is set for iOS builds.
+- [ ] Intent handlers are registered in DI before `AddMauiAppIntents()`.
+- [ ] Entity query handlers are registered in DI.
+- [ ] `MauiAppIntentsNative.WireUp(...)` runs in iOS startup.
+- [ ] Simulator build succeeds with generated SwiftPM archive.
+- [ ] Generated `.app` contains the framework and `Metadata.appintents`.
+- [ ] `extract.actionsdata` contains expected intent identifiers, shortcut phrases, enum names, entity names, and query names.
+- [ ] Shortcuts app shows generated shortcuts under the app.
+- [ ] Tapping a generated shortcut reaches the C# handler.
+- [ ] Entity picker/search returns dynamic app data from `IAppEntityQueryHandler<TEntity>`.
+- [ ] Device build uses a provisioning profile with Siri capability before testing Siri voice.

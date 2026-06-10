@@ -10,6 +10,7 @@
     <Authors>Redth</Authors>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <NoWarn>$(NoWarn);NU5100</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -18,7 +19,30 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Maui.AppIntents.Generator\Maui.AppIntents.Generator.csproj"
+                      ReferenceOutputAssembly="false"
+                      PrivateAssets="all" />
+    <ProjectReference Include="..\Maui.AppIntents.BuildTasks\Maui.AppIntents.BuildTasks.csproj"
+                      ReferenceOutputAssembly="false"
+                      PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="/" />
     <None Include="buildTransitive\**\*" Pack="true" PackagePath="buildTransitive" />
   </ItemGroup>
+
+  <Target Name="_IncludeMauiAppIntentsBuildAssets" BeforeTargets="_GetPackageFiles">
+    <ItemGroup>
+      <None Include="..\Maui.AppIntents.Generator\bin\$(Configuration)\netstandard2.0\Maui.AppIntents.Generator.dll"
+            Pack="true"
+            PackagePath="analyzers/dotnet/cs/"
+            Condition="Exists('..\Maui.AppIntents.Generator\bin\$(Configuration)\netstandard2.0\Maui.AppIntents.Generator.dll')" />
+      <None Include="..\Maui.AppIntents.BuildTasks\bin\$(Configuration)\netstandard2.0\**\*"
+            Pack="true"
+            PackagePath="tasks/"
+            Exclude="..\Maui.AppIntents.BuildTasks\bin\$(Configuration)\netstandard2.0\Microsoft.Build.*;..\Maui.AppIntents.BuildTasks\bin\$(Configuration)\netstandard2.0\*.pdb"
+            Condition="Exists('..\Maui.AppIntents.BuildTasks\bin\$(Configuration)\netstandard2.0\Maui.AppIntents.BuildTasks.dll')" />
+    </ItemGroup>
+  </Target>
 </Project>

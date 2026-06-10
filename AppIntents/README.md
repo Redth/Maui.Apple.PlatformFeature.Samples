@@ -15,6 +15,7 @@ A comprehensive sample demonstrating how to integrate **Apple Siri App Intents**
 | **Intent Donation** | Donates intents from C# when users act in the MAUI UI |
 | **Swift ↔ C# Bridge** | In-process communication via @objc protocol binding |
 | **Dialog Responses** | Rich Siri dialog confirmations and results |
+| **Generated C# Path** | Prototype `Maui.AppIntents` package generates SwiftPM AppIntent/AppEnum/AppEntity declarations from C# |
 
 ## Architecture
 
@@ -128,6 +129,8 @@ MauiAppIntentsSample/
 │   ├── AppIntentResponse.cs                 # Handler contract + response envelope
 │   ├── MauiAppIntentRegistry.cs             # JSON dispatcher registration/runtime
 │   └── buildTransitive/                     # MSBuild SwiftPM generation + native packaging
+├── Maui.AppIntents.Generator/                # Roslyn source generator for semantic discovery/managed glue
+├── Maui.AppIntents.BuildTasks/               # Compiled MSBuild tasks for SwiftPM generation/validation
 │
 └── scripts/
     └── build-appintents-swiftpm.sh         # Experimental no-.xcodeproj Swift build spike
@@ -177,9 +180,9 @@ This target is **not** wired into the default MAUI build yet. The default build 
 
 ### Prototype: C#-Authored App Intents Package
 
-`Maui.AppIntents/` is the reusable package prototype for the generated path: app developers write C# intent handlers and set `MauiAppIntentsEnabled=true`; MSBuild then generates Swift declarations, a SwiftPM package under `obj/`, an xcframework, C# native bridge glue, and `Metadata.appintents` without a checked-in `.xcodeproj`.
+`Maui.AppIntents/` is the reusable package prototype for the generated path: app developers write C# intent handlers and set `MauiAppIntentsEnabled=true`; a Roslyn incremental generator semantically discovers the attributed symbols, emits managed registration/native bridge glue, and stores an intermediate manifest in assembly metadata. A compiled MSBuild task reads that manifest after `CoreCompile`, generates Swift declarations and a SwiftPM package under `obj/`, archives an xcframework, and copies `Metadata.appintents` without a checked-in `.xcodeproj`.
 
-The current package vertical slice supports primitive parameters and app shortcuts:
+The current package vertical slice supports primitive parameters, optional values, `AppEnum` parameters, `AppEntity` parameters with dynamic query handlers, multi-select entity parameters, typed result values, entity properties, generated donations, and app shortcuts:
 
 ```csharp
 [AppIntent("CreateTaskIntent", Title = "Create Task")]
@@ -188,24 +191,96 @@ public sealed class CreateTaskIntent : IAppIntentHandler<CreateTaskIntent.Reques
 {
     public sealed record Request(
         [property: IntentParameter("Title")] string Title,
-        [property: IntentParameter("Estimated Minutes", IsOptional = true)] int? EstimatedMinutes);
+        [property: IntentParameter("Estimated Minutes", IsOptional = true)] int? EstimatedMinutes,
+        [property: IntentParameter("Priority", IsOptional = true)] TaskPriorityLevel? Priority);
 
     public Task<AppIntentResponse> HandleAsync(Request request, CancellationToken cancellationToken)
     {
         return Task.FromResult(AppIntentResponse.Succeeded($"Created {request.Title}"));
     }
 }
+
+[AppEnum("Task Priority")]
+public enum TaskPriorityLevel
+{
+    [AppEnumCase("Low")]
+    Low = 0,
+
+    [AppEnumCase("Medium")]
+    Medium = 1
+}
 ```
 
-See `Maui.AppIntents/README.md` for the package API, AppDelegate bridge hookup, build properties, and current v1 scope.
+Handlers can also return values to Shortcuts by implementing `IAppIntentHandler<TRequest, TResult>`:
 
-The sample app currently wires one generated intent, `CreateGeneratedTaskIntent`, alongside the hand-written Swift/binding sample to validate the end-to-end packaging and bridge model. During generated-path validation, the app-level `Metadata.appintents` copy comes from `Maui.AppIntents`, so the generated metadata is the bundle metadata iOS indexes.
+```csharp
+[AppIntent("CreateTaskIntent", Title = "Create Task")]
+public sealed class CreateTaskIntent
+    : IAppIntentHandler<CreateTaskIntent.Request, AppEntityReference<TaskItem>>
+{
+    public sealed record Request([property: IntentParameter("Title")] string Title);
+
+    public Task<AppIntentResponse<AppEntityReference<TaskItem>>> HandleAsync(
+        Request request,
+        CancellationToken cancellationToken)
+    {
+        var task = CreateTask(request.Title);
+        return Task.FromResult(AppIntentResponse<AppEntityReference<TaskItem>>.Succeeded(
+            new AppEntityReference<TaskItem> { Id = task.Id, Display = task.Title, Subtitle = task.Notes },
+            $"Created {task.Title}"));
+    }
+}
+```
+
+Entities are normal C# models plus a DI query handler:
+
+```csharp
+[AppEntity("TaskItem", TypeDisplayName = "Task")]
+public sealed class TaskItem
+{
+    [AppEntityIdentifier]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+
+    [AppEntityDisplay]
+    public string Title { get; set; } = "";
+
+    [AppEntitySubtitle]
+    public string? Notes { get; set; }
+
+    [AppEntityProperty("Priority")]
+    public TaskPriorityLevel Priority { get; set; }
+}
+
+[AppEntityQueryHandler(typeof(TaskItem))]
+public sealed class TaskItemQueryHandler : IAppEntityQueryHandler<TaskItem>
+{
+    public Task<IReadOnlyList<TaskItem>> GetEntitiesAsync(IReadOnlyList<string> ids, CancellationToken token)
+        => Task.FromResult<IReadOnlyList<TaskItem>>(ids.Select(LoadTaskById).OfType<TaskItem>().ToList());
+
+    public Task<IReadOnlyList<TaskItem>> SearchEntitiesAsync(string query, CancellationToken token)
+        => Task.FromResult(SearchTasks(query));
+
+    public Task<IReadOnlyList<TaskItem>> SuggestedEntitiesAsync(CancellationToken token)
+        => Task.FromResult(GetRecentIncompleteTasks());
+}
+```
+
+Entity intent parameters use `AppEntityReference<TEntity>` so handlers re-fetch authoritative app data by ID. Multi-select entity parameters use `IReadOnlyList<AppEntityReference<TEntity>>` and generate Swift array parameters.
+
+See `Maui.AppIntents/README.md` for the full package walkthrough, AppDelegate bridge hookup, build properties, entity setup, and current v1 scope.
+
+The sample app currently wires generated create, complete, complete-many, and list intents alongside the hand-written Swift/binding sample to validate the end-to-end packaging and bridge model. During generated-path validation, the app-level `Metadata.appintents` copy comes from `Maui.AppIntents`, so the generated metadata is the bundle metadata iOS indexes.
 
 Simulator validation has confirmed:
 
 - the generated SwiftPM framework is embedded under `Frameworks/`
-- `Metadata.appintents/extract.actionsdata` contains `CreateGeneratedTaskIntent`
-- the generated C ABI bridge symbol is exported from the framework
+- `Metadata.appintents/extract.actionsdata` contains `CreateGeneratedTaskIntent`, `CompleteGeneratedTaskIntent`, `CompleteGeneratedTasksIntent`, and `ListGeneratedTasksIntent`
+- generated `Task Priority` and `Task Category` enum metadata is extracted from C# `[AppEnum]` declarations
+- generated `TaskItemEntity` and `TaskItemEntityQuery` metadata is extracted from C# `[AppEntity]` and `[AppEntityQueryHandler]` declarations
+- generated entity property metadata is extracted from `[AppEntityProperty]` declarations
+- typed `ReturnsValue<T>` metadata is extracted for value-returning intents
+- generated donation wrappers can donate C#-authored intents through `MauiAppIntentsNative.Donate`
+- the generated dispatcher and donation C ABI bridge symbols are exported from the framework
 - the generated bundle validation target passes before codesigning
 - startup logs include `[AppIntents] Generated bridge wired up successfully.`
 - iOS indexes the generated shortcut phrase as `Create a generated task in TaskTracker`
@@ -215,10 +290,11 @@ Simulator validation has confirmed:
 ### How the Build Works
 
 1. The handwritten sample still builds its Swift framework through the binding project's `<XcodeProject>` item.
-2. When `MauiAppIntentsEnabled=true`, the reusable package also scans attributed C# and generates a SwiftPM package under `obj/`.
-3. The generated SwiftPM package is archived with `xcodebuild`, producing an xcframework and `Metadata.appintents` without a checked-in generated `.xcodeproj`.
-4. MSBuild registers the generated xcframework as a `NativeReference`, copies generated `Metadata.appintents` into the `.app`, and validates the bundle before codesigning.
-5. Incremental inputs/outputs track the generated Swift, runtime shim, build script, metadata, xcframework, and validation stamp so xcodebuild is skipped when inputs are unchanged.
+2. When `MauiAppIntentsEnabled=true`, the reusable package adds a Roslyn generator. The generator collects attributed C# symbols without regex parsing and emits managed glue plus a manifest attribute into the app intermediate assembly.
+3. A compiled MSBuild task reads that manifest and generates a SwiftPM package under `obj/`.
+4. The generated SwiftPM package is archived with `xcodebuild`, producing an xcframework and `Metadata.appintents` without a checked-in generated `.xcodeproj`.
+5. MSBuild registers the generated xcframework as a `NativeReference` before `_ExpandNativeReferences`, copies generated `Metadata.appintents` into the `.app`, and validates the bundle before codesigning.
+6. Incremental inputs/outputs track the app intermediate assembly, generated Swift, runtime shim, build script, metadata, xcframework, and validation stamp so xcodebuild is skipped when inputs are unchanged.
 
 ## Testing Siri Intents
 

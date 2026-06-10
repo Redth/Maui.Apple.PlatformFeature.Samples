@@ -1,70 +1,42 @@
 # Maui.AppIntents
 
-Prototype package for C#-authored App Intents in .NET MAUI iOS apps.
+`Maui.AppIntents` is a prototype C# authoring package for Apple App Intents in .NET MAUI iOS apps. App developers write C# attributes, handlers, enums, and entity query handlers; the build generates the Swift declarations that iOS requires for Shortcuts, Siri, and Spotlight discovery.
 
-The intended flow is:
+The goal is **no user-written Swift and no checked-in Xcode project** for the generated path. Swift and Xcode are still used internally because Apple discovers App Intents from compile-time Swift metadata.
 
-1. Author intent handlers in C# with attributes.
-2. MSBuild scans the attributed C# during iOS builds when `MauiAppIntentsEnabled=true`.
-3. MSBuild emits app-specific Swift declarations, a reusable Swift JSON bridge, and C# native interop glue under `obj/`.
-4. `xcodebuild` archives a fresh SwiftPM package directly from `Package.swift`; no checked-in `.xcodeproj` is needed.
-5. The generated xcframework is added as a `NativeReference`, `Metadata.appintents` is copied into the app bundle, and the final bundle is validated before codesigning.
+## What the package generates
 
-The reusable part is the C# API, generated dispatcher, native bridge glue, and Swift runtime JSON bridge. The per-app generated Swift stays intentionally small: only the `AppIntent`, `AppEntity`, `AppEnum`, `EntityQuery`, and `AppShortcutsProvider` declarations Apple needs to extract metadata.
+1. A Roslyn incremental source generator discovers C# symbols such as `[AppIntent]`, `[AppEnum]`, and `[AppEntity]` during `CoreCompile`.
+2. The generator emits managed registration, native bridge glue, and a JSON manifest embedded in the app intermediate assembly.
+3. A compiled MSBuild task reads that manifest after `CoreCompile` and writes a fresh SwiftPM package under `obj/`.
+4. `xcodebuild archive` builds that generated package directly from `Package.swift`, producing an xcframework and `Metadata.appintents`.
+5. MSBuild adds the xcframework as a `NativeReference`, copies `Metadata.appintents` into the `.app`, and validates the final bundle before codesigning.
 
-At runtime the generated C# glue loads the embedded SwiftPM framework from `NSBundle.MainBundle.PrivateFrameworksPath` and resolves a stable C ABI entry point with `dlopen`/`dlsym`. This avoids depending on direct `[DllImport("<FrameworkName>")]` resolution, which is not reliable for copied embedded frameworks on iOS.
+The generated Swift stays intentionally small: `AppIntent`, `AppEntity`, `EntityStringQuery`, `AppEnum`, and `AppShortcutsProvider` declarations plus a reusable JSON bridge.
 
-## C# authoring example
+## Setup
 
-```csharp
-[AppIntent("CreateTaskIntent",
-    Title = "Create Task",
-    Description = "Creates a new task")]
-[AppShortcut("Create a task in ${applicationName}",
-    ShortTitle = "Create Task",
-    SystemImageName = "plus.circle")]
-public sealed class CreateTaskIntent :
-    IAppIntentHandler<CreateTaskIntent.Request>
-{
-    public sealed class Request
-    {
-        [IntentParameter("Title")]
-        public string TaskTitle { get; set; } = "";
-
-        [IntentParameter("Estimated Minutes", IsOptional = true)]
-        public int? EstimatedMinutes { get; set; }
-    }
-
-    public Task<AppIntentResponse> HandleAsync(
-        Request request,
-        CancellationToken cancellationToken)
-    {
-        return Task.FromResult(AppIntentResponse.Succeeded(
-            $"Created {request.TaskTitle}"));
-    }
-}
-```
-
-Request positional records are supported too:
-
-```csharp
-public sealed record Request(
-    [property: IntentParameter("Title")] string TaskTitle,
-    [property: IntentParameter("Estimated Minutes", IsOptional = true)] int? EstimatedMinutes);
-```
-
-Enable the build integration in the app project:
+Reference the package and enable generation for iOS builds:
 
 ```xml
+<ItemGroup>
+  <PackageReference Include="Maui.AppIntents" Version="0.1.0-preview" />
+</ItemGroup>
+
 <PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
   <MauiAppIntentsEnabled>true</MauiAppIntentsEnabled>
 </PropertyGroup>
 ```
 
-Register services:
+For local development in this repository the sample uses a `ProjectReference` and imports `buildTransitive/Maui.AppIntents.props` and `.targets` directly. NuGet consumers get those imports automatically.
+
+Register your handlers, entity query handlers, and the package runtime:
 
 ```csharp
+builder.Services.AddSingleton<ITaskService, TaskService>();
 builder.Services.AddTransient<CreateTaskIntent>();
+builder.Services.AddTransient<CompleteTaskIntent>();
+builder.Services.AddTransient<TaskItemQueryHandler>();
 builder.Services.AddMauiAppIntents();
 ```
 
@@ -76,36 +48,311 @@ Maui.AppIntents.MauiAppIntentsNative.WireUp(IPlatformApplication.Current!.Servic
 #endif
 ```
 
-`MauiAppIntentsArchivePlatforms` can be set to `Simulator`, `Device`, or `Both`. By default, simulator RIDs build only simulator archives, device RIDs build only device archives, and RID-less builds archive both. `MauiAppIntentsValidateBundle` defaults to `true`; set it to `false` only when diagnosing the build pipeline.
+## Author an intent
 
-## Build validation
+An intent is a normal DI-created C# class that implements `IAppIntentHandler<TRequest>`.
 
-The package injects into the iOS build graph through MSBuild dependency properties instead of fragile `BeforeTargets`/`AfterTargets` hooks. The generated SwiftPM archive runs only when its generated Swift, runtime shim, package manifest, or build script inputs change. After the SDK has assembled the `.app` bundle and before codesigning, the validation gate checks:
+```csharp
+[AppIntent("CreateTaskIntent",
+    Title = "Create Task",
+    Description = "Creates a task from Shortcuts")]
+[AppShortcut("Create a task in ${applicationName}",
+    ShortTitle = "Create Task",
+    SystemImageName = "plus.circle")]
+public sealed class CreateTaskIntent : IAppIntentHandler<CreateTaskIntent.Request>
+{
+    private readonly ITaskService tasks;
 
-- `Metadata.appintents/extract.actionsdata` and `version.json` are present in the app bundle.
-- The generated embedded framework is present in `Frameworks/`.
-- The framework exports the stable `MauiAppIntentBridgeSetDispatcher` C ABI symbol.
-- `extract.actionsdata` contains the generated intent identifiers and shortcut phrases from the normalized generator manifest.
+    public CreateTaskIntent(ITaskService tasks)
+    {
+        this.tasks = tasks;
+    }
 
-## Simulator validation
+    public sealed record Request(
+        [property: IntentParameter("Title")] string Title,
+        [property: IntentParameter("Estimated Minutes", IsOptional = true)] int? EstimatedMinutes,
+        [property: IntentParameter("Priority", IsOptional = true)] TaskPriorityLevel? Priority);
 
-The current vertical slice has been validated with the sample app on an iPhone 17 simulator:
+    public Task<AppIntentResponse> HandleAsync(Request request, CancellationToken cancellationToken)
+    {
+        var task = tasks.Create(
+            request.Title,
+            request.Priority ?? TaskPriorityLevel.Medium,
+            estimatedMinutes: request.EstimatedMinutes);
 
-- `dotnet build -f net10.0-ios -r iossimulator-arm64 -p:CodesignEntitlements=` builds the MAUI app, generated SwiftPM package, xcframework, and `Metadata.appintents`.
-- The app bundle contains `Frameworks/<ModuleName>.framework` and `Metadata.appintents/extract.actionsdata`.
-- The generated framework exports `MauiAppIntentBridgeSetDispatcher`.
-- On launch, logs include `[AppIntents] Generated bridge wired up successfully.`
-- The simulator indexes the generated shortcut phrase in the app's custom vocabulary, e.g. `Create a generated task in TaskTracker`.
-- Tapping the generated App Shortcut tile in Shortcuts, entering `Test`, invokes the generated SwiftPM `AppIntent` and reaches the C# handler. Simulator logs include `[AppIntents] Generated handler invoked: Test`, and the MAUI app shows the created `Test` task.
-- `shortcuts://run-shortcut?...` and `/usr/bin/shortcuts run ...` target user-authored Shortcuts by name; in this simulator they do not directly invoke App Shortcuts generated from `AppShortcutsProvider`.
+        return Task.FromResult(AppIntentResponse.Succeeded($"Created '{task.Title}'."));
+    }
+}
+```
 
-## Current v1 scope
+Supported parameter types in the current slice:
 
-- Primitive parameters: `string`, `int`, `long`, `double`, `float`, `decimal`, `bool`, `DateTime`, and nullable variants.
-- Generated `AppIntent` declarations with JSON dispatch into C# handlers.
-- Generated `AppShortcutsProvider` from `[AppShortcut]`.
+| C# type | Generated Swift type |
+| --- | --- |
+| `string` | `String` |
+| `int`, `long` | `Int` |
+| `float`, `double`, `decimal` | `Double` |
+| `bool` | `Bool` |
+| `DateTime`, `DateTimeOffset` | `Date` |
+| nullable variants | optional Swift parameters |
+| `[AppEnum]` enums | generated `AppEnum` |
+| `AppEntityReference<TEntity>` | generated `AppEntity` |
+| `IReadOnlyList<T>`, `List<T>`, `T[]` | multi-value Swift parameters |
+
+Use `IAppIntentHandler<TRequest, TResult>` when an intent returns a value to Shortcuts. Supported result values are the same primitive, enum, entity reference, and collection shapes as parameters.
+
+```csharp
+[AppIntent("CreateTaskIntent", Title = "Create Task")]
+public sealed class CreateTaskIntent
+    : IAppIntentHandler<CreateTaskIntent.Request, AppEntityReference<TaskItem>>
+{
+    public sealed record Request([property: IntentParameter("Title")] string Title);
+
+    public Task<AppIntentResponse<AppEntityReference<TaskItem>>> HandleAsync(
+        Request request,
+        CancellationToken cancellationToken)
+    {
+        var task = tasks.Create(request.Title);
+        var reference = new AppEntityReference<TaskItem>
+        {
+            Id = task.Id,
+            Display = task.Title,
+            Subtitle = task.Notes
+        };
+
+        return Task.FromResult(
+            AppIntentResponse<AppEntityReference<TaskItem>>.Succeeded(reference, $"Created '{task.Title}'."));
+    }
+}
+```
+
+## Add an enum
+
+Annotate normal C# enums. The generated Swift uses an `Int`-backed `AppEnum` and passes raw values through the JSON bridge.
+
+```csharp
+[AppEnum("Task Priority")]
+public enum TaskPriorityLevel
+{
+    [AppEnumCase("Low")]
+    Low = 0,
+
+    [AppEnumCase("Medium")]
+    Medium = 1,
+
+    [AppEnumCase("High")]
+    High = 2
+}
+```
+
+## Add an entity and dynamic query
+
+Annotate the model you want users to pick in Shortcuts. The generator can use the conventions `Id`, `Title` or `Name`, and `Subtitle` or `Notes`, or you can mark properties explicitly.
+
+```csharp
+[AppEntity("TaskItem", TypeDisplayName = "Task")]
+public sealed class TaskItem
+{
+    [AppEntityIdentifier]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+
+    [AppEntityDisplay]
+    public string Title { get; set; } = "";
+
+    [AppEntitySubtitle]
+    public string? Notes { get; set; }
+
+    [AppEntityProperty("Priority")]
+    public TaskPriorityLevel Priority { get; set; }
+
+    [AppEntityProperty("Completed")]
+    public bool IsCompleted { get; set; }
+}
+```
+
+Expose dynamic loading, search, and suggestions with an entity query handler:
+
+```csharp
+[AppEntityQueryHandler(typeof(TaskItem))]
+public sealed class TaskItemQueryHandler : IAppEntityQueryHandler<TaskItem>
+{
+    private readonly ITaskService tasks;
+
+    public TaskItemQueryHandler(ITaskService tasks)
+    {
+        this.tasks = tasks;
+    }
+
+    public Task<IReadOnlyList<TaskItem>> GetEntitiesAsync(
+        IReadOnlyList<string> identifiers,
+        CancellationToken cancellationToken)
+    {
+        var result = identifiers
+            .Select(tasks.GetById)
+            .Where(static task => task is not null)
+            .Cast<TaskItem>()
+            .ToList();
+
+        return Task.FromResult<IReadOnlyList<TaskItem>>(result);
+    }
+
+    public Task<IReadOnlyList<TaskItem>> SearchEntitiesAsync(
+        string query,
+        CancellationToken cancellationToken)
+    {
+        return Task.FromResult(tasks.Search(query));
+    }
+
+    public Task<IReadOnlyList<TaskItem>> SuggestedEntitiesAsync(CancellationToken cancellationToken)
+    {
+        return Task.FromResult(tasks.GetFiltered(showCompleted: false));
+    }
+}
+```
+
+Use `AppEntityReference<TEntity>` in request DTOs. It intentionally carries the selected entity reference (`Id`, `Display`, `Subtitle`) rather than a hydrated model, so handlers can re-fetch authoritative data from app services.
+
+```csharp
+[AppIntent("CompleteTaskIntent", Title = "Complete Task")]
+[AppShortcut("Complete a task in ${applicationName}",
+    ShortTitle = "Complete Task",
+    SystemImageName = "checkmark.circle")]
+public sealed class CompleteTaskIntent : IAppIntentHandler<CompleteTaskIntent.Request>
+{
+    private readonly ITaskService tasks;
+
+    public CompleteTaskIntent(ITaskService tasks)
+    {
+        this.tasks = tasks;
+    }
+
+    public sealed record Request(
+        [property: IntentParameter("Task")] AppEntityReference<TaskItem> Task);
+
+    public Task<AppIntentResponse> HandleAsync(Request request, CancellationToken cancellationToken)
+    {
+        var task = tasks.GetById(request.Task.Id);
+        if (task is null)
+        {
+            return Task.FromResult(AppIntentResponse.Failed("The selected task could not be found."));
+        }
+
+        tasks.Complete(task.Id);
+        return Task.FromResult(AppIntentResponse.Succeeded($"Completed '{task.Title}'."));
+    }
+}
+```
+
+For multi-select entity parameters, use a collection of references:
+
+```csharp
+[AppIntent("CompleteTasksIntent", Title = "Complete Tasks")]
+public sealed class CompleteTasksIntent : IAppIntentHandler<CompleteTasksIntent.Request, int>
+{
+    public sealed record Request(
+        [property: IntentParameter("Tasks")] IReadOnlyList<AppEntityReference<TaskItem>> Tasks);
+
+    public Task<AppIntentResponse<int>> HandleAsync(Request request, CancellationToken cancellationToken)
+    {
+        var completed = request.Tasks.Count(task => tasks.Complete(task.Id));
+        return Task.FromResult(AppIntentResponse<int>.Succeeded(completed, $"Completed {completed} tasks."));
+    }
+}
+```
+
+The build task generates a Swift `AppEntity` and `EntityStringQuery` for each referenced entity. Query operations use the same JSON bridge as intent execution:
+
+| Operation | Swift query method | C# handler method |
+| --- | --- | --- |
+| `entities` | `entities(for:)` | `GetEntitiesAsync` |
+| `matching` | `entities(matching:)` | `SearchEntitiesAsync` |
+| `suggested` | `suggestedEntities()` | `SuggestedEntitiesAsync` |
+
+Generated Swift query methods return empty results if the in-process dispatcher is not ready, which keeps Shortcuts parameter pickers from surfacing bridge errors during app startup or background query flows.
+
+## Donate generated intents
+
+The generator emits a stable native donation entry point. After `MauiAppIntentsNative.WireUp(...)` has loaded the generated framework, call `MauiAppIntentsNative.Donate(identifier, payload)` with C# property names matching the generated request shape.
+
+```csharp
+#if IOS && MAUI_APPINTENTS
+Maui.AppIntents.MauiAppIntentsNative.Donate("CompleteTaskIntent", new
+{
+    task = new
+    {
+        id = task.Id,
+        display = task.Title,
+        subtitle = task.Notes
+    }
+});
+#endif
+```
+
+Collections use JSON arrays of the same scalar/entity reference payloads.
+
+## Build
+
+Simulator:
+
+```bash
+dotnet build MyApp.csproj -f net10.0-ios -r iossimulator-arm64 -p:CodesignEntitlements=
+```
+
+Device:
+
+```bash
+dotnet build MyApp.csproj -f net10.0-ios
+```
+
+Useful properties:
+
+| Property | Values | Purpose |
+| --- | --- | --- |
+| `MauiAppIntentsEnabled` | `true` / `false` | Enables the generated App Intents pipeline |
+| `MauiAppIntentsModuleName` | Swift identifier | Overrides the generated SwiftPM module/framework name |
+| `MauiAppIntentsArchivePlatforms` | `Simulator`, `Device`, `Both` | Controls which native archives are built |
+| `MauiAppIntentsMinimumOSVersion` | e.g. `17.0` | Sets SwiftPM iOS platform and deployment target |
+| `MauiAppIntentsValidateBundle` | `true` / `false` | Enables final app bundle validation |
+
+`MauiAppIntentsArchivePlatforms` defaults to `Simulator` for simulator RIDs, `Device` for device RIDs, and `Both` for RID-less iOS builds.
+
+## Validate outputs
+
+After a successful build, the `.app` should contain:
+
+```text
+Frameworks/<MauiAppIntentsModuleName>.framework/
+Metadata.appintents/extract.actionsdata
+Metadata.appintents/version.json
+```
+
+The validation target checks that:
+
+- `Metadata.appintents` is inside the app bundle.
+- The generated embedded framework is present.
+- The framework exports the stable `MauiAppIntentBridgeSetDispatcher` and `MauiAppIntentBridgeDonate` C ABI symbols.
+- `extract.actionsdata` contains generated intent, shortcut, enum, entity, and entity property strings from the manifest.
+
+The sample has been validated on an iPhone 17 simulator. It generates `CreateGeneratedTaskIntent`, `CompleteGeneratedTaskIntent`, `CompleteGeneratedTasksIntent`, `ListGeneratedTasksIntent`, `TaskPriorityLevel`, `TaskCategoryType`, `TaskItemEntity`, and `TaskItemEntityQuery`; Shortcuts execution reaches C# through the generated JSON dispatcher.
+
+## Current scope
+
+Implemented:
+
+- C# intent handlers and request DTOs.
+- Primitive, optional, enum, entity, and multi-select parameters.
+- Typed result values through `IAppIntentHandler<TRequest, TResult>` and generated Swift `ReturnsValue<T>`.
+- Generated `AppShortcut` phrases.
+- Generated `AppEnum`, `AppEntity`, and `EntityStringQuery` declarations.
+- Generated entity `@Property` fields from `[AppEntityProperty]`.
+- Dynamic entity lookup, search, and suggested entities through DI query handlers.
+- Generated native donation entry point via `MauiAppIntentsNative.Donate`.
+- Source-generator diagnostics for malformed authoring patterns.
 - Generated C# registration and native bridge glue.
-- Generated SwiftPM package + `xcodebuild archive` + xcframework + `Metadata.appintents`.
-- Automated bundle validation for generated metadata, shortcut phrases, embedded framework, and bridge symbol.
+- Generated SwiftPM package, `xcodebuild archive`, xcframework embedding, metadata copy, and bundle validation.
 
-Entities, enums, rich result values, and `ParameterSummary` generation are the next layer; the build/bridge path is intentionally structured so those declarations can be added without reintroducing app-authored Swift or a checked-in Xcode project.
+Not yet implemented:
+
+- Complex `ParameterSummary` expressions beyond literal summaries.
+- `PredictableIntent`/prediction configuration generation.
+- Out-of-process App Intents extension packaging.
