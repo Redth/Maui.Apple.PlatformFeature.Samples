@@ -6,7 +6,10 @@ namespace MauiAppIntentsSample.AppIntents;
 
 [AppIntent("CompleteGeneratedTaskIntent",
     Title = "Complete Generated Task",
-    Description = "Marks a selected task complete through the generated MAUI App Intents bridge")]
+    Description = "Marks a selected task complete through the generated MAUI App Intents bridge",
+    RequiresConfirmation = true,
+    ConfirmationDialog = "Mark this task as complete?",
+    ConfirmationActionName = AppIntentConfirmationAction.Set)]
 [AppShortcut("Complete a generated task in ${applicationName}",
     ShortTitle = "Complete Task",
     SystemImageName = "checkmark.circle")]

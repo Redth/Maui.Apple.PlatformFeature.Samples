@@ -606,6 +606,14 @@ func mauiAppIntentError(_ category: String?, _ message: String) -> Error {
                 ? "some IntentResult & ProvidesDialog"
                 : "some IntentResult & ReturnsValue<" + SwiftResultType(intent, manifest) + "> & ProvidesDialog";
             sb.AppendLine("    func perform() async throws -> " + resultClause + " {");
+            if (intent.RequiresConfirmation)
+            {
+                var dialogText = string.IsNullOrWhiteSpace(intent.ConfirmationDialog) ? intent.Title : intent.ConfirmationDialog;
+                var actionToken = string.IsNullOrWhiteSpace(intent.ConfirmationActionName) ? "`continue`" : intent.ConfirmationActionName;
+                sb.AppendLine("        if #available(iOS 18.0, *) {");
+                sb.AppendLine("            try await requestConfirmation(actionName: ." + actionToken + ", dialog: IntentDialog(\"" + EscapeSwift(dialogText) + "\"))");
+                sb.AppendLine("        }");
+            }
             sb.AppendLine("        let response = try MauiAppIntentBridge.shared.perform(identifier: \"" + EscapeSwift(intent.Identifier) + "\", payload: [");
             for (var i = 0; i < intent.Parameters.Count; i++)
             {
@@ -1469,6 +1477,12 @@ public sealed class IntentModel
     public string SupportedModes { get; set; } = "";
 
     public bool OpenAppWhenRun { get; set; }
+
+    public bool RequiresConfirmation { get; set; }
+
+    public string ConfirmationDialog { get; set; } = "";
+
+    public string ConfirmationActionName { get; set; } = "";
 
     public string HandlerType { get; set; } = "";
 

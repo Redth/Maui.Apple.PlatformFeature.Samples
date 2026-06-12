@@ -276,6 +276,7 @@ public sealed class AppIntentManifestGenerator : IIncrementalGenerator
             }
 
             var supportedModes = NormalizeSupportedModes(GetNamedInt(appIntentAttribute, "SupportedModes"));
+            var requiresConfirmation = GetNamedBool(appIntentAttribute, "RequiresConfirmation");
             var intent = new IntentModel
             {
                 Identifier = intentIdentifier,
@@ -284,6 +285,9 @@ public sealed class AppIntentManifestGenerator : IIncrementalGenerator
                 ParameterSummary = GetNamedString(appIntentAttribute, "ParameterSummary") ?? "",
                 SupportedModes = supportedModes,
                 OpenAppWhenRun = GetNamedBool(appIntentAttribute, "OpenAppWhenRun") || supportedModes.Contains("Foreground"),
+                RequiresConfirmation = requiresConfirmation,
+                ConfirmationDialog = GetNamedString(appIntentAttribute, "ConfirmationDialog") ?? "",
+                ConfirmationActionName = NormalizeConfirmationAction(GetNamedInt(appIntentAttribute, "ConfirmationActionName")),
                 HandlerType = DisplayName(classSymbol),
                 RequestType = DisplayName(requestType)
             };
@@ -902,6 +906,39 @@ public static class MauiAppIntentsNative
         return "";
     }
 
+    private static string NormalizeConfirmationAction(int value)
+    {
+        // Maps AppIntentConfirmationAction to the Swift ConfirmationActionName member token,
+        // including backticks for Swift reserved words.
+        switch (value)
+        {
+            case 0: return "`continue`";
+            case 1: return "add";
+            case 2: return "book";
+            case 3: return "buy";
+            case 4: return "call";
+            case 5: return "create";
+            case 6: return "`do`";
+            case 7: return "download";
+            case 8: return "go";
+            case 9: return "open";
+            case 10: return "order";
+            case 11: return "pay";
+            case 12: return "post";
+            case 13: return "run";
+            case 14: return "search";
+            case 15: return "send";
+            case 16: return "set";
+            case 17: return "share";
+            case 18: return "start";
+            case 19: return "toggle";
+            case 20: return "turnOff";
+            case 21: return "turnOn";
+            case 22: return "view";
+            default: return "`continue`";
+        }
+    }
+
     private static string NormalizeIndexingKey(string? key)
     {
         if (string.IsNullOrWhiteSpace(key))
@@ -1000,6 +1037,12 @@ internal sealed class IntentModel
     public string SupportedModes { get; set; } = "";
 
     public bool OpenAppWhenRun { get; set; }
+
+    public bool RequiresConfirmation { get; set; }
+
+    public string ConfirmationDialog { get; set; } = "";
+
+    public string ConfirmationActionName { get; set; } = "";
 
     public string HandlerType { get; set; } = "";
 
@@ -1170,6 +1213,12 @@ internal static class ManifestJsonWriter
         WriteProperty(sb, "supportedModes", intent.SupportedModes);
         sb.Append(',');
         WriteProperty(sb, "openAppWhenRun", intent.OpenAppWhenRun);
+        sb.Append(',');
+        WriteProperty(sb, "requiresConfirmation", intent.RequiresConfirmation);
+        sb.Append(',');
+        WriteProperty(sb, "confirmationDialog", intent.ConfirmationDialog);
+        sb.Append(',');
+        WriteProperty(sb, "confirmationActionName", intent.ConfirmationActionName);
         sb.Append(',');
         WriteProperty(sb, "handlerType", intent.HandlerType);
         sb.Append(',');

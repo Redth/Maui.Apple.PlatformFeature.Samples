@@ -52,6 +52,58 @@ public sealed class AppIntentAttribute : Attribute
     /// <c>openAppWhenRun</c> so the behavior is preserved on earlier OS versions.
     /// </summary>
     public AppIntentExecutionModes SupportedModes { get; set; } = AppIntentExecutionModes.Default;
+
+    /// <summary>
+    /// When <c>true</c>, the generated <c>perform()</c> asks the system to confirm the action
+    /// (via <c>requestConfirmation</c>) before invoking the C# handler. This is the common
+    /// "confirm before doing X" flow. The confirmation prompt is gated to iOS 18+; on earlier
+    /// versions the action proceeds without an explicit prompt.
+    /// </summary>
+    public bool RequiresConfirmation { get; set; }
+
+    /// <summary>
+    /// The dialog text shown when <see cref="RequiresConfirmation"/> is <c>true</c>. Defaults to
+    /// the intent title when left null.
+    /// </summary>
+    public string? ConfirmationDialog { get; set; }
+
+    /// <summary>
+    /// The system action verb used for the confirmation button when
+    /// <see cref="RequiresConfirmation"/> is <c>true</c>. Maps to Apple's
+    /// <c>ConfirmationActionName</c>.
+    /// </summary>
+    public AppIntentConfirmationAction ConfirmationActionName { get; set; } = AppIntentConfirmationAction.Continue;
+}
+
+/// <summary>
+/// System action verbs for an intent confirmation button. Maps to Apple's
+/// <c>ConfirmationActionName</c> values used by <c>requestConfirmation(actionName:dialog:)</c>.
+/// </summary>
+public enum AppIntentConfirmationAction
+{
+    Continue = 0,
+    Add = 1,
+    Book = 2,
+    Buy = 3,
+    Call = 4,
+    Create = 5,
+    Do = 6,
+    Download = 7,
+    Go = 8,
+    Open = 9,
+    Order = 10,
+    Pay = 11,
+    Post = 12,
+    Run = 13,
+    Search = 14,
+    Send = 15,
+    Set = 16,
+    Share = 17,
+    Start = 18,
+    Toggle = 19,
+    TurnOff = 20,
+    TurnOn = 21,
+    View = 22,
 }
 
 /// <summary>

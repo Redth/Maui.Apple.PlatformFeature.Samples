@@ -373,6 +373,24 @@ public sealed class TaskTrackerSettings
 
 > **iOS 18 cascade:** `UniqueAppEntity` forces the entity and any intent that references it to iOS 18+. Because `@AppShortcutsBuilder` cannot use `if #available`, such intents are gated with `@available(iOS 18.0, *)` and are **excluded from the generated App Shortcuts provider** (they remain available in the Shortcuts editor and via donation). All other advanced features above are emitted as gated extensions that keep base types at the iOS 17 minimum.
 
+### Confirmation before running
+
+Set `RequiresConfirmation = true` to make the generated `perform()` ask the system to confirm the action (via `requestConfirmation`) before invoking your C# handler — the common "confirm before doing X" flow. The prompt is gated to iOS 18+; on earlier versions the action proceeds without an explicit prompt.
+
+```csharp
+[AppIntent("CompleteGeneratedTaskIntent",
+    Title = "Complete Generated Task",
+    RequiresConfirmation = true,
+    ConfirmationDialog = "Mark this task as complete?",
+    ConfirmationActionName = AppIntentConfirmationAction.Set)]
+public sealed class CompleteGeneratedTaskIntent : IAppIntentHandler<CompleteGeneratedTaskIntent.Request>
+{
+    // ...
+}
+```
+
+`ConfirmationDialog` defaults to the intent title when omitted. `ConfirmationActionName` maps to Apple's `ConfirmationActionName` verbs (`Continue`, `Set`, `Buy`, `Send`, `Delete`-style actions, etc.) used to label the confirmation button.
+
 ## Build
 
 Simulator:
@@ -434,6 +452,7 @@ Implemented:
 - Typed `AppIntentError` categories via `AppIntentResponse.Failed(AppIntentErrorCategory, …)`.
 - `IndexedEntity` + indexing keys for Spotlight; `URLRepresentableEntity`/`URLRepresentableEnum` deep links.
 - `UniqueAppEntity`/`UniqueAppEntityQuery` singleton entities.
+- Pre-execution confirmation via `[AppIntent(RequiresConfirmation = true, …)]` → gated `requestConfirmation`.
 - Generated native donation entry point via `MauiAppIntentsNative.Donate`.
 - Source-generator diagnostics for malformed authoring patterns.
 - Generated C# registration and native bridge glue.
@@ -448,7 +467,7 @@ Declarative gaps (achievable by generating more static Swift from C# metadata):
 
 Bridge/runtime gaps (need new reusable-shim + JSON-dispatch contracts):
 
-- Interaction flow: `requestConfirmation` (incl. conditional), `requestValue`, disambiguation.
+- Interaction flow: `requestConfirmation` pre-execution confirmation is **implemented** (`RequiresConfirmation`); conditional `requestConfirmation(conditions:)`, `requestValue`, and disambiguation are not yet.
 - Real cancellation (`CancellableIntent`/`IntentCancellationReason`) wired into the handler `CancellationToken`.
 - `LongRunningIntent`/progress, `UndoableIntent`, `IntentFile`/`FileEntity` parameters.
 - `Transferable`/`NSUserActivity` onscreen awareness, `EntityPropertyQuery`, `DynamicOptionsProvider`, `EntityCollection`, `AppUnionValue`/`@UnionValue`, `OwnershipProvidingEntity`, `RelevantEntities`.

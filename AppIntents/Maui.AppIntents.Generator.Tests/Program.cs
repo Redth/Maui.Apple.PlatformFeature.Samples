@@ -97,7 +97,8 @@ static void RunValidAuthoringScenario()
                 => Task.FromResult(AppIntentResponse.Failed(AppIntentErrorCategory.EntityNotFound, "Missing"));
         }
 
-        [AppIntent("CompleteTasksIntent", Title = "Complete Tasks", SupportedModes = AppIntentExecutionModes.Background)]
+        [AppIntent("CompleteTasksIntent", Title = "Complete Tasks", SupportedModes = AppIntentExecutionModes.Background,
+            RequiresConfirmation = true, ConfirmationDialog = "Complete these tasks?", ConfirmationActionName = AppIntentConfirmationAction.Set)]
         [AppIntentSummary("Complete tasks")]
         [AppIntentSummary("Complete tasks urgently", WhenParameter = "Priority", EqualsValue = "High")]
         [AppShortcut("Complete tasks in ${applicationName}", ShortTitle = "Complete Tasks")]
@@ -216,6 +217,7 @@ static void RunBuildTaskScenario(Compilation compilation)
         AssertContains(swift, "@_cdecl(\"MauiAppIntentBridgeDonate\")");
 
         AssertContains(swift, "static var supportedModes: IntentModes { [.background] }");
+        AssertContains(swift, "try await requestConfirmation(actionName: .set, dialog: IntentDialog(\"Complete these tasks?\"))");
         AssertContains(swift, "extension TaskItemEntity: IndexedEntity");
         AssertContains(swift, "set.contentDescription");
         AssertContains(swift, "extension TaskItemEntity: URLRepresentableEntity");
