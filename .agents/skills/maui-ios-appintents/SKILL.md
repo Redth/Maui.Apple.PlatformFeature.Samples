@@ -306,11 +306,16 @@ The validation target should fail the build if generated metadata, shortcut phra
 
 ## When to use the manual Swift/binding fallback
 
-Use the legacy Swift framework + binding library pattern when the generated package does not yet support the feature the user needs, such as:
+Use the legacy Swift framework + binding library pattern when the generated package does not yet support the feature the user needs. Based on the audit against Apple's App Intents docs (2024–2026), the generated path does **not** yet cover:
 
-- advanced result protocols not covered by generated `ReturnsValue<T>` value results
-- complex `ParameterSummary` or `PredictableIntent` configurations
-- app extensions or out-of-process execution models
+- Apple Intelligence assistant schemas (`app-schema-domains` / `@AssistantIntent`/`@AssistantEntity`/`@AssistantEnum`).
+- Modern `supportedModes`/`IntentModes`, `IndexedEntity` Spotlight indexing, `URLRepresentable*` deep links, `UniqueAppEntity`, `SyncableEntity`.
+- Interaction flow (`requestConfirmation`/`requestValue`/disambiguation), real cancellation (`CancellableIntent`), `LongRunningIntent`/progress, `UndoableIntent`.
+- `IntentFile`/`FileEntity` parameters, `Transferable`/`NSUserActivity` onscreen awareness, `EntityPropertyQuery`, `DynamicOptionsProvider`, `AppUnionValue`/`@UnionValue`, `EntityCollection`.
+- Out-of-process App Intents extension + `allowedExecutionTargets`, interactive snippets / snippet views (`SnippetIntent`), controls/camera/audio intents, `PredictableIntent`.
+- Complex `ParameterSummary` expressions beyond a literal summary.
+
+See `plan.md` ("Audit: C#-first App Intents vs Apple documentation (2024–2026)") in the session/research notes for the full feature matrix and the phased gap roadmap (G1 declarative quick wins → G2 bridge interaction/lifecycle → G3 assistant schemas → G4 architectural/UI).
 
 For manual fallback details, read:
 

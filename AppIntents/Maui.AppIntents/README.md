@@ -351,8 +351,30 @@ Implemented:
 - Generated C# registration and native bridge glue.
 - Generated SwiftPM package, `xcodebuild archive`, xcframework embedding, metadata copy, and bundle validation.
 
-Not yet implemented:
+Not yet implemented (gaps vs Apple's App Intents framework, 2024–2026):
 
-- Complex `ParameterSummary` expressions beyond literal summaries.
+Declarative gaps (achievable by generating more static Swift from C# metadata):
+
+- Modern `supportedModes`/`IntentModes` (the current idiom replacing the `OpenAppWhenRun` boolean).
+- `IndexedEntity` + `@Property(indexingKey:)` Spotlight indexing.
+- `URLRepresentableIntent`/`URLRepresentableEntity`/`URLRepresentableEnum` deep links.
+- `UniqueAppEntity`/`UniqueAppEntityQuery` singleton entities and `SyncableEntity` cross-device IDs.
+- Rich `ParameterSummary` expressions (only literal `Summary("…")` is generated today).
+- Typed `AppIntentError` categories.
+- Apple Intelligence assistant schemas (`app-schema-domains` via `@AssistantIntent`/`@AssistantEntity`/`@AssistantEnum`) — generatable but the largest declarative workstream.
+
+Bridge/runtime gaps (need new reusable-shim + JSON-dispatch contracts):
+
+- Interaction flow: `requestConfirmation` (incl. conditional), `requestValue`, disambiguation.
+- Real cancellation (`CancellableIntent`/`IntentCancellationReason`) wired into the handler `CancellationToken`.
+- `LongRunningIntent`/progress, `UndoableIntent`, `IntentFile`/`FileEntity` parameters.
+- `Transferable`/`NSUserActivity` onscreen awareness, `EntityPropertyQuery`, `DynamicOptionsProvider`, `EntityCollection`, `AppUnionValue`/`@UnionValue`, `OwnershipProvidingEntity`, `RelevantEntities`.
+
+Architectural / UI gaps (separate effort, may need hand-authored Swift):
+
+- Out-of-process App Intents extension and `allowedExecutionTargets`/`IntentExecutionTargets`.
+- Interactive snippets / result snippet views (`SnippetIntent`, `ShowsSnippetView`) — SwiftUI, not expressible from C#.
+- `ControlConfigurationIntent` (see the Widgets sample), `CameraCaptureIntent`, `AudioRecordingIntent`, `IntentValueQuery` (visual intelligence).
 - `PredictableIntent`/prediction configuration generation.
-- Out-of-process App Intents extension packaging.
+
+See `plan.md` ("Audit: C#-first App Intents vs Apple documentation (2024–2026)") for the full feature matrix and prioritized roadmap.
