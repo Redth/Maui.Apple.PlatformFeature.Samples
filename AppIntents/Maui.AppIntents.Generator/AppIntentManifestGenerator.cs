@@ -15,6 +15,7 @@ namespace Maui.AppIntents.Generator;
 public sealed class AppIntentManifestGenerator : IIncrementalGenerator
 {
     private const string AppIntentAttributeName = "Maui.AppIntents.AppIntentAttribute";
+    private const string AppIntentSummaryAttributeName = "Maui.AppIntents.AppIntentSummaryAttribute";
     private const string AppShortcutAttributeName = "Maui.AppIntents.AppShortcutAttribute";
     private const string IntentParameterAttributeName = "Maui.AppIntents.IntentParameterAttribute";
     private const string AppEnumAttributeName = "Maui.AppIntents.AppEnumAttribute";
@@ -130,7 +131,8 @@ public sealed class AppIntentManifestGenerator : IIncrementalGenerator
             {
                 Name = enumSymbol.Name,
                 FullName = DisplayName(enumSymbol),
-                TypeDisplayName = GetConstructorString(appEnumAttribute, 0) ?? SplitWords(enumSymbol.Name)
+                TypeDisplayName = GetConstructorString(appEnumAttribute, 0) ?? SplitWords(enumSymbol.Name),
+                UrlRepresentation = GetNamedString(appEnumAttribute, "UrlRepresentation") ?? ""
             };
 
             foreach (var field in enumSymbol.GetMembers().OfType<IFieldSymbol>().Where(static f => !f.IsImplicitlyDeclared))
@@ -184,7 +186,10 @@ public sealed class AppIntentManifestGenerator : IIncrementalGenerator
                 TypeDisplayName = GetNamedString(appEntityAttribute, "TypeDisplayName") ?? SplitWords(typeSymbol.Name),
                 IdProperty = idProperty.Name,
                 DisplayProperty = displayProperty.Name,
-                SubtitleProperty = subtitleProperty?.Name ?? ""
+                SubtitleProperty = subtitleProperty?.Name ?? "",
+                Indexed = GetNamedBool(appEntityAttribute, "Indexed"),
+                Unique = GetNamedBool(appEntityAttribute, "Unique"),
+                UrlRepresentation = GetNamedString(appEntityAttribute, "UrlRepresentation") ?? ""
             };
 
             foreach (var property in typeSymbol.GetMembers().OfType<IPropertySymbol>().Where(static property => !property.IsImplicitlyDeclared))
@@ -205,7 +210,8 @@ public sealed class AppIntentManifestGenerator : IIncrementalGenerator
                     TypeName = DisplayName(propertyType),
                     Kind = ParameterKind(propertyType),
                     IsOptional = IsNullableValueType(property.Type) || property.NullableAnnotation == NullableAnnotation.Annotated,
-                    IsCollection = isCollection
+                    IsCollection = isCollection,
+                    IndexingKey = NormalizeIndexingKey(GetNamedString(propertyAttribute, "IndexingKey"))
                 };
 
                 if (enums.TryGetValue(propertyType, out var appEnum))
@@ -269,16 +275,34 @@ public sealed class AppIntentManifestGenerator : IIncrementalGenerator
                 continue;
             }
 
+            var supportedModes = NormalizeSupportedModes(GetNamedInt(appIntentAttribute, "SupportedModes"));
             var intent = new IntentModel
             {
                 Identifier = intentIdentifier,
                 Title = GetNamedString(appIntentAttribute, "Title") ?? SplitWords(classSymbol.Name),
                 Description = GetNamedString(appIntentAttribute, "Description") ?? "",
                 ParameterSummary = GetNamedString(appIntentAttribute, "ParameterSummary") ?? "",
-                OpenAppWhenRun = GetNamedBool(appIntentAttribute, "OpenAppWhenRun"),
+                SupportedModes = supportedModes,
+                OpenAppWhenRun = GetNamedBool(appIntentAttribute, "OpenAppWhenRun") || supportedModes.Contains("Foreground"),
                 HandlerType = DisplayName(classSymbol),
                 RequestType = DisplayName(requestType)
             };
+
+            foreach (var summaryAttribute in GetAttributes(classSymbol, AppIntentSummaryAttributeName))
+            {
+                var format = GetConstructorString(summaryAttribute, 0) ?? "";
+                if (string.IsNullOrWhiteSpace(format))
+                {
+                    continue;
+                }
+
+                intent.SummaryCases.Add(new SummaryCaseModel
+                {
+                    Format = format,
+                    WhenParameter = GetNamedString(summaryAttribute, "WhenParameter") ?? "",
+                    EqualsValue = GetNamedString(summaryAttribute, "EqualsValue") ?? ""
+                });
+            }
 
             ApplyResultModel(classSymbol, intent, enums, appEntities, sourceContext);
 
@@ -836,6 +860,64 @@ public static class MauiAppIntentsNative
         return null;
     }
 
+    private static int GetNamedInt(AttributeData attribute, string name)
+    {
+        foreach (var pair in attribute.NamedArguments)
+        {
+            if (string.Equals(pair.Key, name, StringComparison.Ordinal) && pair.Value.Value is not null)
+            {
+                try
+                {
+                    return Convert.ToInt32(pair.Value.Value, CultureInfo.InvariantCulture);
+                }
+                catch
+                {
+                    return 0;
+                }
+            }
+        }
+
+        return 0;
+    }
+
+    private static string NormalizeSupportedModes(int flags)
+    {
+        var foreground = (flags & 1) != 0;
+        var background = (flags & 2) != 0;
+        if (foreground && background)
+        {
+            return "ForegroundAndBackground";
+        }
+
+        if (foreground)
+        {
+            return "Foreground";
+        }
+
+        if (background)
+        {
+            return "Background";
+        }
+
+        return "";
+    }
+
+    private static string NormalizeIndexingKey(string? key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return "";
+        }
+
+        return key!.Trim() switch
+        {
+            "contentDescription" => "contentDescription",
+            "title" => "title",
+            "keywords" => "keywords",
+            _ => ""
+        };
+    }
+
     private static string LowerFirst(string value)
     {
         return string.IsNullOrEmpty(value) ? value : char.ToLowerInvariant(value[0]) + value.Substring(1);
@@ -915,6 +997,8 @@ internal sealed class IntentModel
 
     public string ParameterSummary { get; set; } = "";
 
+    public string SupportedModes { get; set; } = "";
+
     public bool OpenAppWhenRun { get; set; }
 
     public string HandlerType { get; set; } = "";
@@ -936,6 +1020,17 @@ internal sealed class IntentModel
     public List<ParameterModel> Parameters { get; } = new();
 
     public List<ShortcutModel> Shortcuts { get; } = new();
+
+    public List<SummaryCaseModel> SummaryCases { get; } = new();
+}
+
+internal sealed class SummaryCaseModel
+{
+    public string Format { get; set; } = "";
+
+    public string WhenParameter { get; set; } = "";
+
+    public string EqualsValue { get; set; } = "";
 }
 
 internal sealed class ParameterModel
@@ -980,6 +1075,8 @@ internal sealed class AppEnumModel
 
     public string TypeDisplayName { get; set; } = "";
 
+    public string UrlRepresentation { get; set; } = "";
+
     public List<AppEnumCaseModel> Cases { get; } = new();
 }
 
@@ -1012,6 +1109,12 @@ internal sealed class AppEntityModel
 
     public string QueryHandlerType { get; set; } = "";
 
+    public bool Indexed { get; set; }
+
+    public bool Unique { get; set; }
+
+    public string UrlRepresentation { get; set; } = "";
+
     public List<AppEntityPropertyModel> Properties { get; } = new();
 }
 
@@ -1032,6 +1135,8 @@ internal sealed class AppEntityPropertyModel
     public bool IsOptional { get; set; }
 
     public bool IsCollection { get; set; }
+
+    public string IndexingKey { get; set; } = "";
 
     public string EnumTypeName { get; set; } = "";
 }
@@ -1062,6 +1167,8 @@ internal static class ManifestJsonWriter
         sb.Append(',');
         WriteProperty(sb, "parameterSummary", intent.ParameterSummary);
         sb.Append(',');
+        WriteProperty(sb, "supportedModes", intent.SupportedModes);
+        sb.Append(',');
         WriteProperty(sb, "openAppWhenRun", intent.OpenAppWhenRun);
         sb.Append(',');
         WriteProperty(sb, "handlerType", intent.HandlerType);
@@ -1083,6 +1190,19 @@ internal static class ManifestJsonWriter
         WriteArray(sb, "parameters", intent.Parameters, WriteParameter);
         sb.Append(',');
         WriteArray(sb, "shortcuts", intent.Shortcuts, WriteShortcut);
+        sb.Append(',');
+        WriteArray(sb, "summaryCases", intent.SummaryCases, WriteSummaryCase);
+        sb.Append('}');
+    }
+
+    private static void WriteSummaryCase(StringBuilder sb, SummaryCaseModel summaryCase)
+    {
+        sb.Append('{');
+        WriteProperty(sb, "format", summaryCase.Format);
+        sb.Append(',');
+        WriteProperty(sb, "whenParameter", summaryCase.WhenParameter);
+        sb.Append(',');
+        WriteProperty(sb, "equalsValue", summaryCase.EqualsValue);
         sb.Append('}');
     }
 
@@ -1133,6 +1253,8 @@ internal static class ManifestJsonWriter
         sb.Append(',');
         WriteProperty(sb, "typeDisplayName", appEnum.TypeDisplayName);
         sb.Append(',');
+        WriteProperty(sb, "urlRepresentation", appEnum.UrlRepresentation);
+        sb.Append(',');
         WriteArray(sb, "cases", appEnum.Cases, WriteAppEnumCase);
         sb.Append('}');
     }
@@ -1169,6 +1291,12 @@ internal static class ManifestJsonWriter
         sb.Append(',');
         WriteProperty(sb, "queryHandlerType", appEntity.QueryHandlerType);
         sb.Append(',');
+        WriteProperty(sb, "indexed", appEntity.Indexed);
+        sb.Append(',');
+        WriteProperty(sb, "unique", appEntity.Unique);
+        sb.Append(',');
+        WriteProperty(sb, "urlRepresentation", appEntity.UrlRepresentation);
+        sb.Append(',');
         WriteArray(sb, "properties", appEntity.Properties, WriteAppEntityProperty);
         sb.Append('}');
     }
@@ -1191,6 +1319,8 @@ internal static class ManifestJsonWriter
         WriteProperty(sb, "isOptional", property.IsOptional);
         sb.Append(',');
         WriteProperty(sb, "isCollection", property.IsCollection);
+        sb.Append(',');
+        WriteProperty(sb, "indexingKey", property.IndexingKey);
         sb.Append(',');
         WriteProperty(sb, "enumTypeName", property.EnumTypeName);
         sb.Append('}');

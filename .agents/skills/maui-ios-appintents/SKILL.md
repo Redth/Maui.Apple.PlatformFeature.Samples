@@ -293,6 +293,19 @@ Metadata.appintents/version.json
 
 The validation target should fail the build if generated metadata, shortcut phrases, enum/entity/property names, the embedded framework, or the generated dispatcher/donation bridge symbols are missing.
 
+### 7. Advanced declarative features
+
+These optional features emit extra static Swift the metadata extractor reads. All are validated against the Xcode toolchain in the sample.
+
+- **Execution modes:** `[AppIntent(SupportedModes = AppIntentExecutionModes.Foreground|Background|ForegroundAndBackground)]` emits an iOS 26 `supportedModes` extension (keeps `openAppWhenRun` as fallback).
+- **Conditional summaries:** one or more `[AppIntentSummary("Create {Title}")]`, with `WhenParameter`/`EqualsValue` for conditional `When/otherwise` chains. `{ParameterName}` tokens interpolate parameters.
+- **Typed errors:** `AppIntentResponse.Failed(AppIntentErrorCategory.EntityNotFound, "…")` maps to Swift `AppIntentError` cases (iOS 18+) with a generic fallback.
+- **Spotlight:** `[AppEntity(Indexed = true)]` + `[AppEntityProperty(IndexingKey = "contentDescription"|"title"|"keywords")]` → `IndexedEntity` + `CSSearchableItemAttributeSet`.
+- **Deep links:** `[AppEntity(UrlRepresentation = "app://task/{id}?x={Prop}")]` / `[AppEnum(UrlRepresentation = "app://priority")]` → `URLRepresentableEntity`/`URLRepresentableEnum`.
+- **Singletons:** `[AppEntity(Unique = true)]` → `UniqueAppEntity` + `UniqueAppEntityQuery`.
+
+> **iOS 18 cascade gotcha:** `UniqueAppEntity` forces its entity and any referencing intent to iOS 18+. Because `@AppShortcutsBuilder` cannot use `if #available`, those intents are gated `@available(iOS 18.0, *)` and **excluded from the generated App Shortcuts provider** (still available in the Shortcuts editor and via donation). Every other advanced feature is emitted as a gated extension that keeps base types at the iOS 17 minimum, so it does not affect shortcuts.
+
 ## Generated-path gotchas
 
 1. **Swift is still required internally.** Do not promise a no-Xcode toolchain story. The generated path removes user-authored Swift/Xcode assets, not Apple's Swift metadata extraction requirement.
@@ -309,11 +322,12 @@ The validation target should fail the build if generated metadata, shortcut phra
 Use the legacy Swift framework + binding library pattern when the generated package does not yet support the feature the user needs. Based on the audit against Apple's App Intents docs (2024–2026), the generated path does **not** yet cover:
 
 - Apple Intelligence assistant schemas (`app-schema-domains` / `@AssistantIntent`/`@AssistantEntity`/`@AssistantEnum`).
-- Modern `supportedModes`/`IntentModes`, `IndexedEntity` Spotlight indexing, `URLRepresentable*` deep links, `UniqueAppEntity`, `SyncableEntity`.
+- `SyncableEntity` (conformance not present in the installed iOS SDK).
 - Interaction flow (`requestConfirmation`/`requestValue`/disambiguation), real cancellation (`CancellableIntent`), `LongRunningIntent`/progress, `UndoableIntent`.
 - `IntentFile`/`FileEntity` parameters, `Transferable`/`NSUserActivity` onscreen awareness, `EntityPropertyQuery`, `DynamicOptionsProvider`, `AppUnionValue`/`@UnionValue`, `EntityCollection`.
 - Out-of-process App Intents extension + `allowedExecutionTargets`, interactive snippets / snippet views (`SnippetIntent`), controls/camera/audio intents, `PredictableIntent`.
-- Complex `ParameterSummary` expressions beyond a literal summary.
+
+The generated path **does** now cover (no fallback needed): `supportedModes`/`IntentModes`, rich/conditional `ParameterSummary`, typed `AppIntentError` categories, `IndexedEntity` Spotlight indexing, `URLRepresentable*` deep links, and `UniqueAppEntity`.
 
 See `plan.md` ("Audit: C#-first App Intents vs Apple documentation (2024–2026)") in the session/research notes for the full feature matrix and the phased gap roadmap (G1 declarative quick wins → G2 bridge interaction/lifecycle → G3 assistant schemas → G4 architectural/UI).
 

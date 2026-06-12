@@ -5,6 +5,36 @@ using System.Threading.Tasks;
 
 namespace Maui.AppIntents;
 
+/// <summary>
+/// Maps a failed intent to a typed Swift <c>AppIntentError</c> case (iOS 18+). On earlier OS
+/// versions the generated code falls back to a generic failure carrying the error message.
+/// </summary>
+public enum AppIntentErrorCategory
+{
+    /// <summary>No typed category; a generic failure with the error message is surfaced.</summary>
+    None = 0,
+
+    // AppIntentError.Unrecoverable
+    NetworkFailure,
+    NotAllowed,
+    UnsupportedOnDevice,
+    FeatureRestricted,
+    EntityNotFound,
+
+    // AppIntentError.UserActionRequired
+    NeedsSignIn,
+    NeedsAccountSetup,
+    NeedsConfirmation,
+
+    // AppIntentError.PermissionRequired
+    PermissionSiri,
+    PermissionPhotos,
+    PermissionContacts,
+    PermissionLocation,
+    PermissionBluetooth,
+    PermissionLocalNetwork,
+}
+
 public sealed class AppIntentResponse
 {
     public bool Success { get; set; } = true;
@@ -12,6 +42,9 @@ public sealed class AppIntentResponse
     public string? Dialog { get; set; }
 
     public string? Error { get; set; }
+
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public AppIntentErrorCategory ErrorCategory { get; set; } = AppIntentErrorCategory.None;
 
     public object? Value { get; set; }
 
@@ -37,6 +70,17 @@ public sealed class AppIntentResponse
             Dialog = dialog
         };
     }
+
+    public static AppIntentResponse Failed(AppIntentErrorCategory category, string error, string? dialog = null)
+    {
+        return new AppIntentResponse
+        {
+            Success = false,
+            Error = error,
+            ErrorCategory = category,
+            Dialog = dialog
+        };
+    }
 }
 
 public sealed class AppIntentResponse<TResult>
@@ -46,6 +90,9 @@ public sealed class AppIntentResponse<TResult>
     public string? Dialog { get; set; }
 
     public string? Error { get; set; }
+
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public AppIntentErrorCategory ErrorCategory { get; set; } = AppIntentErrorCategory.None;
 
     public TResult? Value { get; set; }
 
@@ -68,6 +115,17 @@ public sealed class AppIntentResponse<TResult>
         {
             Success = false,
             Error = error,
+            Dialog = dialog
+        };
+    }
+
+    public static AppIntentResponse<TResult> Failed(AppIntentErrorCategory category, string error, string? dialog = null)
+    {
+        return new AppIntentResponse<TResult>
+        {
+            Success = false,
+            Error = error,
+            ErrorCategory = category,
             Dialog = dialog
         };
     }

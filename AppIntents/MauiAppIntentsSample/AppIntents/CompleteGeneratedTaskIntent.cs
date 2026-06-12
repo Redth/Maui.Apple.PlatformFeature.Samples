@@ -32,7 +32,9 @@ public sealed class CompleteGeneratedTaskIntent : IAppIntentHandler<CompleteGene
         var task = taskService.GetById(request.Task.Id);
         if (task is null)
         {
-            return Task.FromResult(AppIntentResponse.Failed("The selected task could not be found."));
+            return Task.FromResult(AppIntentResponse.Failed(
+                AppIntentErrorCategory.EntityNotFound,
+                "The selected task could not be found."));
         }
 
         if (!taskService.Complete(task.Id))

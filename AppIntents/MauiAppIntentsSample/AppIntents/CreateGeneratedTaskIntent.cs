@@ -6,7 +6,10 @@ namespace MauiAppIntentsSample.AppIntents;
 
 [AppIntent("CreateGeneratedTaskIntent",
     Title = "Create Generated Task",
-    Description = "Creates a task through the generated MAUI App Intents bridge")]
+    Description = "Creates a task through the generated MAUI App Intents bridge",
+    SupportedModes = AppIntentExecutionModes.Foreground)]
+[AppIntentSummary("Create {Title}")]
+[AppIntentSummary("Create {Title} as an urgent task", WhenParameter = "Priority", EqualsValue = "Urgent")]
 [AppShortcut("Create a generated task in ${applicationName}",
     ShortTitle = "Create Generated Task",
     SystemImageName = "sparkles")]

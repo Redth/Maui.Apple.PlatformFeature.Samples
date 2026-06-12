@@ -22,7 +22,7 @@ static void RunValidAuthoringScenario()
 
         namespace Sample;
 
-        [AppEnum("Priority")]
+        [AppEnum("Priority", UrlRepresentation = "app://priority")]
         public enum Priority
         {
             [AppEnumCase("Low")]
@@ -32,7 +32,7 @@ static void RunValidAuthoringScenario()
             High = 1
         }
 
-        [AppEntity("TaskItem", TypeDisplayName = "Task")]
+        [AppEntity("TaskItem", TypeDisplayName = "Task", Indexed = true, UrlRepresentation = "app://task/{id}")]
         public sealed class TaskItem
         {
             [AppEntityIdentifier]
@@ -43,6 +43,9 @@ static void RunValidAuthoringScenario()
 
             [AppEntitySubtitle]
             public string? Notes { get; set; }
+
+            [AppEntityProperty("Details", IndexingKey = "contentDescription")]
+            public string Details { get; set; } = "";
 
             [AppEntityProperty("Priority")]
             public Priority Priority { get; set; }
@@ -61,7 +64,42 @@ static void RunValidAuthoringScenario()
                 => Task.FromResult<IReadOnlyList<TaskItem>>(new List<TaskItem>());
         }
 
-        [AppIntent("CompleteTasksIntent", Title = "Complete Tasks")]
+        [AppEntity("Settings", TypeDisplayName = "Settings", Unique = true)]
+        public sealed class Settings
+        {
+            [AppEntityIdentifier]
+            public string Id { get; set; } = "settings";
+
+            [AppEntityDisplay]
+            public string Title { get; set; } = "Settings";
+        }
+
+        [AppEntityQueryHandler(typeof(Settings))]
+        public sealed class SettingsQueryHandler : IAppEntityQueryHandler<Settings>
+        {
+            public Task<IReadOnlyList<Settings>> GetEntitiesAsync(IReadOnlyList<string> identifiers, CancellationToken cancellationToken)
+                => Task.FromResult<IReadOnlyList<Settings>>(new List<Settings> { new() });
+
+            public Task<IReadOnlyList<Settings>> SearchEntitiesAsync(string query, CancellationToken cancellationToken)
+                => Task.FromResult<IReadOnlyList<Settings>>(new List<Settings> { new() });
+
+            public Task<IReadOnlyList<Settings>> SuggestedEntitiesAsync(CancellationToken cancellationToken)
+                => Task.FromResult<IReadOnlyList<Settings>>(new List<Settings> { new() });
+        }
+
+        [AppIntent("ShowSettingsIntent", Title = "Show Settings")]
+        public sealed class ShowSettingsIntent : IAppIntentHandler<ShowSettingsIntent.Request>
+        {
+            public sealed record Request(
+                [property: IntentParameter("Settings")] AppEntityReference<Settings> Settings);
+
+            public Task<AppIntentResponse> HandleAsync(Request request, CancellationToken cancellationToken)
+                => Task.FromResult(AppIntentResponse.Failed(AppIntentErrorCategory.EntityNotFound, "Missing"));
+        }
+
+        [AppIntent("CompleteTasksIntent", Title = "Complete Tasks", SupportedModes = AppIntentExecutionModes.Background)]
+        [AppIntentSummary("Complete tasks")]
+        [AppIntentSummary("Complete tasks urgently", WhenParameter = "Priority", EqualsValue = "High")]
         [AppShortcut("Complete tasks in ${applicationName}", ShortTitle = "Complete Tasks")]
         public sealed class CompleteTasksIntent : IAppIntentHandler<CompleteTasksIntent.Request, int>
         {
@@ -176,6 +214,27 @@ static void RunBuildTaskScenario(Compilation compilation)
         AssertContains(swift, "var tasks: [TaskItemEntity]");
         AssertContains(swift, "ReturnsValue<Int>");
         AssertContains(swift, "@_cdecl(\"MauiAppIntentBridgeDonate\")");
+
+        AssertContains(swift, "static var supportedModes: IntentModes { [.background] }");
+        AssertContains(swift, "extension TaskItemEntity: IndexedEntity");
+        AssertContains(swift, "set.contentDescription");
+        AssertContains(swift, "extension TaskItemEntity: URLRepresentableEntity");
+        AssertContains(swift, "extension Priority: URLRepresentableEnum");
+        AssertContains(swift, "static var parameterSummary: some ParameterSummary");
+        AssertContains(swift, "When(\\.$priority, .equalTo, Priority.high)");
+        AssertContains(swift, "mauiAppIntentError(response.errorCategory");
+        AssertContains(swift, "struct SettingsEntity: UniqueAppEntity");
+        AssertContains(swift, "UniqueAppEntityQuery");
+        AssertContains(swift, "@available(iOS 18.0, *)");
+
+        var runtime = File.ReadAllText(Path.Combine(
+            outputDirectory,
+            "Sources",
+            "RegressionIntents",
+            "Runtime",
+            "MauiAppIntentsRuntime.swift"));
+        AssertContains(runtime, "func mauiAppIntentError");
+        AssertContains(runtime, "AppIntentError.UserActionRequired");
 
         var manifest = File.ReadAllText(validationManifest);
         AssertContains(manifest, "property\tpriority");

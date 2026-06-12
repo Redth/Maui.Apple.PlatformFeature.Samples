@@ -14,6 +14,7 @@ public sealed class MauiAppIntentRegistry
     public const string EntityQueryEntitiesOperation = "entities";
     public const string EntityQueryMatchingOperation = "matching";
     public const string EntityQuerySuggestedOperation = "suggested";
+    public const string EntityQueryUniqueOperation = "unique";
 
     private static readonly JsonSerializerOptions JsonOptions = new JsonSerializerOptions
     {
@@ -72,6 +73,7 @@ public sealed class MauiAppIntentRegistry
                 Success = response.Success,
                 Dialog = response.Dialog,
                 Error = response.Error,
+                ErrorCategory = response.ErrorCategory,
                 Value = response.Value
             };
         };
@@ -113,6 +115,10 @@ public sealed class MauiAppIntentRegistry
                     break;
                 case EntityQuerySuggestedOperation:
                     entities = await handler.SuggestedEntitiesAsync(cancellationToken).ConfigureAwait(false);
+                    break;
+                case EntityQueryUniqueOperation:
+                    var suggested = await handler.SuggestedEntitiesAsync(cancellationToken).ConfigureAwait(false);
+                    entities = suggested.Take(1).ToList();
                     break;
                 default:
                     entities = Array.Empty<TEntity>();

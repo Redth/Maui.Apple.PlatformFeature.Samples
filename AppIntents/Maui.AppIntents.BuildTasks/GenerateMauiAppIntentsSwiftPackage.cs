@@ -20,6 +20,8 @@ public sealed class GenerateMauiAppIntentsSwiftPackage : Task
         PropertyNameCaseInsensitive = true
     };
 
+    private Dictionary<string, AppEnumModel> _manifestEnums = new Dictionary<string, AppEnumModel>(StringComparer.Ordinal);
+
     public ITaskItem[] IntermediateAssembly { get; set; } = Array.Empty<ITaskItem>();
 
     [Required]
@@ -264,6 +266,7 @@ public struct MauiAppIntentResponse: Decodable {
     public var success: Bool
     public var dialog: String?
     public var error: String?
+    public var errorCategory: String?
     public var value: MauiAppIntentJSONValue?
 }
 
@@ -367,16 +370,51 @@ public enum MauiAppIntentRuntimeError: Error, CustomLocalizedStringResourceConve
         }
     }
 }
+
+func mauiAppIntentError(_ category: String?, _ message: String) -> Error {
+    guard let category, !category.isEmpty, category != ""None"" else {
+        return MauiAppIntentRuntimeError.failed(message)
+    }
+
+    if #available(iOS 18.0, *) {
+        switch category {
+        case ""NetworkFailure"": return AppIntentError.Unrecoverable.networkFailure
+        case ""NotAllowed"": return AppIntentError.Unrecoverable.notAllowed
+        case ""UnsupportedOnDevice"": return AppIntentError.Unrecoverable.unsupportedOnDevice
+        case ""FeatureRestricted"": return AppIntentError.Unrecoverable.featureCurrentlyRestricted
+        case ""EntityNotFound"": return AppIntentError.Unrecoverable.entityNotFound
+        case ""NeedsSignIn"": return AppIntentError.UserActionRequired.signin
+        case ""NeedsAccountSetup"": return AppIntentError.UserActionRequired.accountSetup
+        case ""NeedsConfirmation"": return AppIntentError.UserActionRequired.confirmation
+        case ""PermissionSiri"": return AppIntentError.PermissionRequired.siri
+        case ""PermissionPhotos"": return AppIntentError.PermissionRequired.photos
+        case ""PermissionContacts"": return AppIntentError.PermissionRequired.contacts
+        case ""PermissionLocation"": return AppIntentError.PermissionRequired.location()
+        case ""PermissionBluetooth"": return AppIntentError.PermissionRequired.bluetooth
+        case ""PermissionLocalNetwork"": return AppIntentError.PermissionRequired.localNetwork
+        default: return MauiAppIntentRuntimeError.failed(message)
+        }
+    }
+
+    return MauiAppIntentRuntimeError.failed(message)
+}
 ");
     }
 
     private void WriteGeneratedSwift(AppIntentsManifest manifest)
     {
+        _manifestEnums = manifest.AppEnums
+            .GroupBy(e => e.FullName, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
         var generatedDir = Path.Combine(OutputDirectory, "Sources", ModuleName, "Generated");
         Directory.CreateDirectory(generatedDir);
         var sb = new StringBuilder();
         sb.AppendLine("import AppIntents");
         sb.AppendLine("import Foundation");
+        if (ReferencedEntities(manifest).Any(static e => e.Indexed))
+        {
+            sb.AppendLine("import CoreSpotlight");
+        }
         sb.AppendLine();
 
         var appEnums = ReferencedEnums(manifest);
@@ -403,6 +441,16 @@ public enum MauiAppIntentRuntimeError: Error, CustomLocalizedStringResourceConve
             sb.AppendLine("    ]");
             sb.AppendLine("}");
             sb.AppendLine();
+            if (!string.IsNullOrWhiteSpace(appEnum.UrlRepresentation))
+            {
+                sb.AppendLine("@available(iOS 18.0, *)");
+                sb.AppendLine("extension " + swiftName + ": URLRepresentableEnum {");
+                sb.AppendLine("    static var urlRepresentation: EnumURLRepresentation<" + swiftName + "> {");
+                sb.AppendLine("        \"" + EscapeSwift(appEnum.UrlRepresentation) + "\"");
+                sb.AppendLine("    }");
+                sb.AppendLine("}");
+                sb.AppendLine();
+            }
         }
 
         var appEntities = ReferencedEntities(manifest);
@@ -410,7 +458,15 @@ public enum MauiAppIntentRuntimeError: Error, CustomLocalizedStringResourceConve
         {
             var swiftName = SwiftEntityTypeName(appEntity);
             var queryName = swiftName + "Query";
-            sb.AppendLine("struct " + swiftName + ": AppEntity {");
+            if (appEntity.Unique)
+            {
+                sb.AppendLine("@available(iOS 18.0, *)");
+                sb.AppendLine("struct " + swiftName + ": UniqueAppEntity {");
+            }
+            else
+            {
+                sb.AppendLine("struct " + swiftName + ": AppEntity {");
+            }
             sb.AppendLine("    static var defaultQuery = " + queryName + "()");
             sb.AppendLine("    static var typeDisplayRepresentation: TypeDisplayRepresentation = TypeDisplayRepresentation(name: \"" + EscapeSwift(appEntity.TypeDisplayName) + "\")");
             sb.AppendLine();
@@ -456,38 +512,68 @@ public enum MauiAppIntentRuntimeError: Error, CustomLocalizedStringResourceConve
             sb.AppendLine("    }");
             sb.AppendLine("}");
             sb.AppendLine();
-            sb.AppendLine("struct " + queryName + ": EntityStringQuery {");
-            sb.AppendLine("    func entities(for identifiers: [String]) async throws -> [" + swiftName + "] {");
-            sb.AppendLine("        do {");
-            sb.AppendLine("            return try MauiAppIntentBridge.shared.query(identifier: \"" + EscapeSwift(appEntity.Identifier) + "\", operation: \"entities\", payload: [\"identifiers\": identifiers]).map(" + swiftName + ".init)");
-            sb.AppendLine("        } catch {");
-            sb.AppendLine("            return []");
-            sb.AppendLine("        }");
-            sb.AppendLine("    }");
-            sb.AppendLine();
-            sb.AppendLine("    func entities(matching string: String) async throws -> IntentItemCollection<" + swiftName + "> {");
-            sb.AppendLine("        do {");
-            sb.AppendLine("            let entities = try MauiAppIntentBridge.shared.query(identifier: \"" + EscapeSwift(appEntity.Identifier) + "\", operation: \"matching\", payload: [\"query\": string]).map(" + swiftName + ".init)");
-            sb.AppendLine("            return IntentItemCollection(items: entities)");
-            sb.AppendLine("        } catch {");
-            sb.AppendLine("            return IntentItemCollection(items: [])");
-            sb.AppendLine("        }");
-            sb.AppendLine("    }");
-            sb.AppendLine();
-            sb.AppendLine("    func suggestedEntities() async throws -> IntentItemCollection<" + swiftName + "> {");
-            sb.AppendLine("        do {");
-            sb.AppendLine("            let entities = try MauiAppIntentBridge.shared.query(identifier: \"" + EscapeSwift(appEntity.Identifier) + "\", operation: \"suggested\", payload: [:]).map(" + swiftName + ".init)");
-            sb.AppendLine("            return IntentItemCollection(items: entities)");
-            sb.AppendLine("        } catch {");
-            sb.AppendLine("            return IntentItemCollection(items: [])");
-            sb.AppendLine("        }");
-            sb.AppendLine("    }");
-            sb.AppendLine("}");
-            sb.AppendLine();
+            if (appEntity.Unique)
+            {
+                sb.AppendLine("@available(iOS 18.0, *)");
+                sb.AppendLine("struct " + queryName + ": UniqueAppEntityQuery {");
+                sb.AppendLine("    func uniqueEntity() async throws -> " + swiftName + " {");
+                sb.AppendLine("        let entities = try MauiAppIntentBridge.shared.query(identifier: \"" + EscapeSwift(appEntity.Identifier) + "\", operation: \"unique\", payload: [:]).map(" + swiftName + ".init)");
+                sb.AppendLine("        guard let entity = entities.first else { throw MauiAppIntentRuntimeError.failed(\"No unique entity for " + EscapeSwift(appEntity.Identifier) + "\") }");
+                sb.AppendLine("        return entity");
+                sb.AppendLine("    }");
+                sb.AppendLine("}");
+                sb.AppendLine();
+            }
+            else
+            {
+                sb.AppendLine("struct " + queryName + ": EntityStringQuery {");
+                sb.AppendLine("    func entities(for identifiers: [String]) async throws -> [" + swiftName + "] {");
+                sb.AppendLine("        do {");
+                sb.AppendLine("            return try MauiAppIntentBridge.shared.query(identifier: \"" + EscapeSwift(appEntity.Identifier) + "\", operation: \"entities\", payload: [\"identifiers\": identifiers]).map(" + swiftName + ".init)");
+                sb.AppendLine("        } catch {");
+                sb.AppendLine("            return []");
+                sb.AppendLine("        }");
+                sb.AppendLine("    }");
+                sb.AppendLine();
+                sb.AppendLine("    func entities(matching string: String) async throws -> IntentItemCollection<" + swiftName + "> {");
+                sb.AppendLine("        do {");
+                sb.AppendLine("            let entities = try MauiAppIntentBridge.shared.query(identifier: \"" + EscapeSwift(appEntity.Identifier) + "\", operation: \"matching\", payload: [\"query\": string]).map(" + swiftName + ".init)");
+                sb.AppendLine("            return IntentItemCollection(items: entities)");
+                sb.AppendLine("        } catch {");
+                sb.AppendLine("            return IntentItemCollection(items: [])");
+                sb.AppendLine("        }");
+                sb.AppendLine("    }");
+                sb.AppendLine();
+                sb.AppendLine("    func suggestedEntities() async throws -> IntentItemCollection<" + swiftName + "> {");
+                sb.AppendLine("        do {");
+                sb.AppendLine("            let entities = try MauiAppIntentBridge.shared.query(identifier: \"" + EscapeSwift(appEntity.Identifier) + "\", operation: \"suggested\", payload: [:]).map(" + swiftName + ".init)");
+                sb.AppendLine("            return IntentItemCollection(items: entities)");
+                sb.AppendLine("        } catch {");
+                sb.AppendLine("            return IntentItemCollection(items: [])");
+                sb.AppendLine("        }");
+                sb.AppendLine("    }");
+                sb.AppendLine("}");
+                sb.AppendLine();
+            }
+
+            if (appEntity.Indexed)
+            {
+                sb.Append(WriteIndexedEntityExtension(appEntity, swiftName));
+            }
+
+            if (!string.IsNullOrWhiteSpace(appEntity.UrlRepresentation))
+            {
+                sb.Append(WriteUrlRepresentableEntityExtension(appEntity, swiftName));
+            }
         }
 
         foreach (var intent in manifest.Intents)
         {
+            var intentGated = IntentReferencesUnique(intent, manifest);
+            if (intentGated)
+            {
+                sb.AppendLine("@available(iOS 18.0, *)");
+            }
             sb.AppendLine("struct " + SwiftTypeName(intent.Identifier) + ": AppIntent {");
             sb.AppendLine("    static var title: LocalizedStringResource = \"" + EscapeSwift(intent.Title) + "\"");
             if (!string.IsNullOrWhiteSpace(intent.Description))
@@ -509,11 +595,10 @@ public enum MauiAppIntentRuntimeError: Error, CustomLocalizedStringResourceConve
                 sb.AppendLine();
             }
 
-            if (!string.IsNullOrWhiteSpace(intent.ParameterSummary))
+            var summary = WriteParameterSummary(intent);
+            if (summary.Length > 0)
             {
-                sb.AppendLine("    static var parameterSummary: some ParameterSummary {");
-                sb.AppendLine("        Summary(\"" + EscapeSwift(intent.ParameterSummary) + "\")");
-                sb.AppendLine("    }");
+                sb.Append(summary);
                 sb.AppendLine();
             }
 
@@ -529,7 +614,7 @@ public enum MauiAppIntentRuntimeError: Error, CustomLocalizedStringResourceConve
                 sb.AppendLine("            \"" + EscapeSwift(parameter.SwiftName) + "\": " + PayloadExpression(parameter) + suffix);
             }
             sb.AppendLine("        ])");
-            sb.AppendLine("        if response.success == false { throw MauiAppIntentRuntimeError.failed(response.error ?? \"Intent failed\") }");
+            sb.AppendLine("        if response.success == false { throw mauiAppIntentError(response.errorCategory, response.error ?? \"Intent failed\") }");
             if (string.IsNullOrWhiteSpace(intent.ResultKind))
             {
                 sb.AppendLine("        return .result(dialog: IntentDialog(stringLiteral: response.dialog ?? \"Done\"))");
@@ -542,9 +627,14 @@ public enum MauiAppIntentRuntimeError: Error, CustomLocalizedStringResourceConve
             sb.AppendLine("    }");
             sb.AppendLine("}");
             sb.AppendLine();
+
+            if (!string.IsNullOrWhiteSpace(intent.SupportedModes))
+            {
+                sb.Append(WriteSupportedModesExtension(intent, intentGated));
+            }
         }
 
-        var shortcuts = manifest.Intents.Where(i => i.Shortcuts.Count > 0).ToList();
+        var shortcuts = manifest.Intents.Where(i => i.Shortcuts.Count > 0 && !IntentReferencesUnique(i, manifest)).ToList();
         if (shortcuts.Count > 0)
         {
             sb.AppendLine("struct GeneratedAppShortcuts: AppShortcutsProvider {");
@@ -594,13 +684,29 @@ public enum MauiAppIntentRuntimeError: Error, CustomLocalizedStringResourceConve
         foreach (var intent in manifest.Intents)
         {
             sb.AppendLine("    case \"" + EscapeSwift(intent.Identifier) + "\":");
-            sb.AppendLine("        let intent = " + SwiftTypeName(intent.Identifier) + "()");
-            foreach (var parameter in intent.Parameters)
+            if (IntentReferencesUnique(intent, manifest))
             {
-                sb.AppendLine(DonationAssignment(parameter, manifest));
+                sb.AppendLine("        if #available(iOS 18.0, *) {");
+                sb.AppendLine("            let intent = " + SwiftTypeName(intent.Identifier) + "()");
+                foreach (var parameter in intent.Parameters)
+                {
+                    sb.AppendLine("    " + DonationAssignment(parameter, manifest));
+                }
+                sb.AppendLine("            donateGeneratedIntent(intent)");
+                sb.AppendLine("            return 1");
+                sb.AppendLine("        }");
+                sb.AppendLine("        return 0");
             }
-            sb.AppendLine("        donateGeneratedIntent(intent)");
-            sb.AppendLine("        return 1");
+            else
+            {
+                sb.AppendLine("        let intent = " + SwiftTypeName(intent.Identifier) + "()");
+                foreach (var parameter in intent.Parameters)
+                {
+                    sb.AppendLine(DonationAssignment(parameter, manifest));
+                }
+                sb.AppendLine("        donateGeneratedIntent(intent)");
+                sb.AppendLine("        return 1");
+            }
         }
         sb.AppendLine("    default:");
         sb.AppendLine("        return 0");
@@ -777,6 +883,13 @@ date -u +%Y-%m-%dT%H:%M:%SZ > ""$BUILD_DIR/appintents-build.stamp""
                 .Select(parameter => parameter.EnumTypeName),
             StringComparer.Ordinal);
 
+        foreach (var resultEnum in manifest.Intents
+            .Where(intent => intent.ResultKind == "Enum" && !string.IsNullOrWhiteSpace(intent.ResultEnumTypeName))
+            .Select(intent => intent.ResultEnumTypeName))
+        {
+            referencedEnumNames.Add(resultEnum);
+        }
+
         return manifest.AppEnums
             .Where(appEnum => referencedEnumNames.Contains(appEnum.FullName))
             .OrderBy(appEnum => appEnum.FullName, StringComparer.Ordinal)
@@ -792,10 +905,252 @@ date -u +%Y-%m-%dT%H:%M:%SZ > ""$BUILD_DIR/appintents-build.stamp""
                 .Select(parameter => parameter.EntityTypeName),
             StringComparer.Ordinal);
 
+        foreach (var resultEntity in manifest.Intents
+            .Where(intent => intent.ResultKind == "Entity" && !string.IsNullOrWhiteSpace(intent.ResultEntityTypeName))
+            .Select(intent => intent.ResultEntityTypeName))
+        {
+            referencedEntityNames.Add(resultEntity);
+        }
+
         return manifest.AppEntities
             .Where(appEntity => referencedEntityNames.Contains(appEntity.FullName))
             .OrderBy(appEntity => appEntity.FullName, StringComparer.Ordinal)
             .ToList();
+    }
+
+    private static bool IntentReferencesUnique(IntentModel intent, AppIntentsManifest manifest)
+    {
+        var uniqueNames = new HashSet<string>(
+            manifest.AppEntities.Where(e => e.Unique).Select(e => e.FullName),
+            StringComparer.Ordinal);
+        if (uniqueNames.Count == 0)
+        {
+            return false;
+        }
+
+        if (intent.Parameters.Any(p => p.Kind == "Entity" && uniqueNames.Contains(p.EntityTypeName)))
+        {
+            return true;
+        }
+
+        return !string.IsNullOrWhiteSpace(intent.ResultEntityTypeName) && uniqueNames.Contains(intent.ResultEntityTypeName);
+    }
+
+    private string WriteParameterSummary(IntentModel intent)
+    {
+        var conditions = intent.SummaryCases
+            .Where(c => !string.IsNullOrWhiteSpace(c.WhenParameter) && !string.IsNullOrWhiteSpace(c.Format))
+            .ToList();
+        var defaultCase = intent.SummaryCases.FirstOrDefault(c => string.IsNullOrWhiteSpace(c.WhenParameter));
+        var defaultFormat = defaultCase?.Format;
+        if (string.IsNullOrWhiteSpace(defaultFormat))
+        {
+            defaultFormat = intent.ParameterSummary;
+        }
+
+        if (conditions.Count == 0)
+        {
+            if (string.IsNullOrWhiteSpace(defaultFormat))
+            {
+                return "";
+            }
+
+            var single = new StringBuilder();
+            single.AppendLine("    static var parameterSummary: some ParameterSummary {");
+            single.AppendLine("        " + RenderSummaryLine(defaultFormat, intent));
+            single.AppendLine("    }");
+            return single.ToString();
+        }
+
+        if (string.IsNullOrWhiteSpace(defaultFormat))
+        {
+            defaultFormat = intent.Title;
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine("    static var parameterSummary: some ParameterSummary {");
+        sb.Append(RenderWhenChain(intent, conditions, 0, defaultFormat, "        "));
+        sb.AppendLine("    }");
+        return sb.ToString();
+    }
+
+    private string RenderWhenChain(IntentModel intent, List<SummaryCaseModel> conditions, int index, string? defaultFormat, string indent)
+    {
+        if (index >= conditions.Count)
+        {
+            return indent + RenderSummaryLine(defaultFormat, intent) + "\n";
+        }
+
+        var condition = conditions[index];
+        var parameter = FindParameter(intent, condition.WhenParameter);
+        if (parameter == null)
+        {
+            return indent + RenderSummaryLine(defaultFormat, intent) + "\n";
+        }
+
+        var value = SummaryConditionValue(parameter, condition.EqualsValue);
+        var sb = new StringBuilder();
+        sb.AppendLine(indent + "When(\\.$" + parameter.SwiftName + ", .equalTo, " + value + ") {");
+        sb.AppendLine(indent + "    " + RenderSummaryLine(condition.Format, intent));
+        sb.AppendLine(indent + "} otherwise: {");
+        sb.Append(RenderWhenChain(intent, conditions, index + 1, defaultFormat, indent + "    "));
+        sb.AppendLine(indent + "}");
+        return sb.ToString();
+    }
+
+    private string RenderSummaryLine(string? format, IntentModel intent)
+    {
+        var escaped = EscapeSwift(format ?? "");
+        foreach (var parameter in intent.Parameters)
+        {
+            var replacement = "\\(\\.$" + parameter.SwiftName + ")";
+            escaped = ReplaceToken(escaped, parameter.Name, replacement);
+            if (!string.Equals(parameter.SwiftName, parameter.Name, StringComparison.Ordinal))
+            {
+                escaped = ReplaceToken(escaped, parameter.SwiftName, replacement);
+            }
+        }
+
+        return "Summary(\"" + escaped + "\")";
+    }
+
+    private static string ReplaceToken(string input, string token, string replacement)
+    {
+        if (string.IsNullOrEmpty(token))
+        {
+            return input;
+        }
+
+        return input.Replace("{" + token + "}", replacement);
+    }
+
+    private string SummaryConditionValue(ParameterModel parameter, string equalsValue)
+    {
+        switch (parameter.Kind)
+        {
+            case "Bool":
+                return string.Equals(equalsValue, "true", StringComparison.OrdinalIgnoreCase) ? "true" : "false";
+            case "Int":
+            case "Double":
+                return string.IsNullOrWhiteSpace(equalsValue) ? "0" : equalsValue.Trim();
+            case "Enum":
+                var enumModel = _manifestEnums != null && _manifestEnums.TryGetValue(parameter.EnumTypeName, out var found)
+                    ? found
+                    : null;
+                if (enumModel != null)
+                {
+                    var swiftEnum = SwiftTypeName(enumModel.Name);
+                    var enumCase = enumModel.Cases.FirstOrDefault(c => string.Equals(c.Name, equalsValue, StringComparison.OrdinalIgnoreCase));
+                    if (enumCase != null)
+                    {
+                        return swiftEnum + "." + SwiftCaseIdentifier(enumCase.Name);
+                    }
+                }
+
+                return "\"" + EscapeSwift(equalsValue) + "\"";
+            default:
+                return "\"" + EscapeSwift(equalsValue) + "\"";
+        }
+    }
+
+    private static ParameterModel FindParameter(IntentModel intent, string name)
+    {
+        return intent.Parameters.FirstOrDefault(p =>
+            string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(p.SwiftName, name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private string WriteSupportedModesExtension(IntentModel intent, bool intentGated)
+    {
+        var modes = SupportedModesExpression(intent.SupportedModes);
+        if (modes.Length == 0)
+        {
+            return "";
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine("@available(iOS 26.0, *)");
+        sb.AppendLine("extension " + SwiftTypeName(intent.Identifier) + " {");
+        sb.AppendLine("    static var supportedModes: IntentModes { " + modes + " }");
+        sb.AppendLine("}");
+        sb.AppendLine();
+        return sb.ToString();
+    }
+
+    private static string SupportedModesExpression(string supportedModes)
+    {
+        switch (supportedModes)
+        {
+            case "Foreground":
+                return "[.foreground]";
+            case "Background":
+                return "[.background]";
+            case "ForegroundAndBackground":
+                return "[.background, .foreground]";
+            default:
+                return "";
+        }
+    }
+
+    private string WriteIndexedEntityExtension(AppEntityModel appEntity, string swiftName)
+    {
+        var indexed = appEntity.Properties
+            .Where(p => !string.IsNullOrWhiteSpace(p.IndexingKey))
+            .ToList();
+
+        var sb = new StringBuilder();
+        sb.AppendLine("@available(iOS 18.0, *)");
+        sb.AppendLine("extension " + swiftName + ": IndexedEntity {");
+        sb.AppendLine("    var attributeSet: CSSearchableItemAttributeSet {");
+        sb.AppendLine("        let set = defaultAttributeSet");
+        sb.AppendLine("        set.displayName = displayString");
+        foreach (var property in indexed)
+        {
+            if (string.Equals(property.IndexingKey, "keywords", StringComparison.Ordinal))
+            {
+                sb.AppendLine("        set.keywords = [\"\\(" + property.SwiftName + ")\"]");
+            }
+            else
+            {
+                sb.AppendLine("        set." + property.IndexingKey + " = \"\\(" + property.SwiftName + ")\"");
+            }
+        }
+        sb.AppendLine("        return set");
+        sb.AppendLine("    }");
+        sb.AppendLine("}");
+        sb.AppendLine();
+        return sb.ToString();
+    }
+
+    private string WriteUrlRepresentableEntityExtension(AppEntityModel appEntity, string swiftName)
+    {
+        var template = SubstituteUrlTemplate(appEntity.UrlRepresentation, appEntity);
+        var sb = new StringBuilder();
+        sb.AppendLine("@available(iOS 18.0, *)");
+        sb.AppendLine("extension " + swiftName + ": URLRepresentableEntity {");
+        sb.AppendLine("    static var urlRepresentation: EntityURLRepresentation<" + swiftName + "> {");
+        sb.AppendLine("        \"" + template + "\"");
+        sb.AppendLine("    }");
+        sb.AppendLine("}");
+        sb.AppendLine();
+        return sb.ToString();
+    }
+
+    private string SubstituteUrlTemplate(string template, AppEntityModel appEntity)
+    {
+        var escaped = EscapeSwift(template ?? "");
+        escaped = escaped.Replace("{id}", "\\(.id)");
+        foreach (var property in appEntity.Properties)
+        {
+            var replacement = "\\(\\.$" + property.SwiftName + ")";
+            escaped = ReplaceToken(escaped, property.Name, replacement);
+            if (!string.Equals(property.SwiftName, property.Name, StringComparison.Ordinal))
+            {
+                escaped = ReplaceToken(escaped, property.SwiftName, replacement);
+            }
+        }
+
+        return escaped;
     }
 
     private static string SwiftType(ParameterModel parameter, AppIntentsManifest manifest)
@@ -1111,6 +1466,8 @@ public sealed class IntentModel
 
     public string ParameterSummary { get; set; } = "";
 
+    public string SupportedModes { get; set; } = "";
+
     public bool OpenAppWhenRun { get; set; }
 
     public string HandlerType { get; set; } = "";
@@ -1132,6 +1489,17 @@ public sealed class IntentModel
     public List<ParameterModel> Parameters { get; set; } = new List<ParameterModel>();
 
     public List<ShortcutModel> Shortcuts { get; set; } = new List<ShortcutModel>();
+
+    public List<SummaryCaseModel> SummaryCases { get; set; } = new List<SummaryCaseModel>();
+}
+
+public sealed class SummaryCaseModel
+{
+    public string Format { get; set; } = "";
+
+    public string WhenParameter { get; set; } = "";
+
+    public string EqualsValue { get; set; } = "";
 }
 
 public sealed class ParameterModel
@@ -1176,6 +1544,8 @@ public sealed class AppEnumModel
 
     public string TypeDisplayName { get; set; } = "";
 
+    public string UrlRepresentation { get; set; } = "";
+
     public List<AppEnumCaseModel> Cases { get; set; } = new List<AppEnumCaseModel>();
 }
 
@@ -1208,6 +1578,12 @@ public sealed class AppEntityModel
 
     public string QueryHandlerType { get; set; } = "";
 
+    public bool Indexed { get; set; }
+
+    public bool Unique { get; set; }
+
+    public string UrlRepresentation { get; set; } = "";
+
     public List<AppEntityPropertyModel> Properties { get; set; } = new List<AppEntityPropertyModel>();
 }
 
@@ -1228,6 +1604,8 @@ public sealed class AppEntityPropertyModel
     public bool IsOptional { get; set; }
 
     public bool IsCollection { get; set; }
+
+    public string IndexingKey { get; set; } = "";
 
     public string EnumTypeName { get; set; } = "";
 }

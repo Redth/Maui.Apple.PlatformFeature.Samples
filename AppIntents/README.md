@@ -182,7 +182,7 @@ This target is **not** wired into the default MAUI build yet. The default build 
 
 `Maui.AppIntents/` is the reusable package prototype for the generated path: app developers write C# intent handlers and set `MauiAppIntentsEnabled=true`; a Roslyn incremental generator semantically discovers the attributed symbols, emits managed registration/native bridge glue, and stores an intermediate manifest in assembly metadata. A compiled MSBuild task reads that manifest after `CoreCompile`, generates Swift declarations and a SwiftPM package under `obj/`, archives an xcframework, and copies `Metadata.appintents` without a checked-in `.xcodeproj`.
 
-The current package vertical slice supports primitive parameters, optional values, `AppEnum` parameters, `AppEntity` parameters with dynamic query handlers, multi-select entity parameters, typed result values, entity properties, generated donations, and app shortcuts:
+The current package vertical slice supports primitive parameters, optional values, `AppEnum` parameters, `AppEntity` parameters with dynamic query handlers, multi-select entity parameters, typed result values, entity properties, generated donations, and app shortcuts. It also generates the declarative Tier-A features from the Apple-docs audit: `supportedModes`/`IntentModes`, rich/conditional `ParameterSummary`, typed `AppIntentError` categories, `IndexedEntity` Spotlight indexing, `URLRepresentable*` deep links, and `UniqueAppEntity` singletons.
 
 ```csharp
 [AppIntent("CreateTaskIntent", Title = "Create Task")]
@@ -278,6 +278,7 @@ Simulator validation has confirmed:
 - generated `Task Priority` and `Task Category` enum metadata is extracted from C# `[AppEnum]` declarations
 - generated `TaskItemEntity` and `TaskItemEntityQuery` metadata is extracted from C# `[AppEntity]` and `[AppEntityQueryHandler]` declarations
 - generated entity property metadata is extracted from `[AppEntityProperty]` declarations
+- generated `supportedModes`, `IndexedEntity`, `URLRepresentableEntity`/`URLRepresentableEnum`, conditional `ParameterSummary`, and `UniqueAppEntity` (`TaskTrackerSettingsEntity`/`ShowTaskTrackerSettingsIntent`) constructs typecheck and extract under the real Xcode toolchain
 - typed `ReturnsValue<T>` metadata is extracted for value-returning intents
 - generated donation wrappers can donate C#-authored intents through `MauiAppIntentsNative.Donate`
 - the generated dispatcher and donation C ABI bridge symbols are exported from the framework

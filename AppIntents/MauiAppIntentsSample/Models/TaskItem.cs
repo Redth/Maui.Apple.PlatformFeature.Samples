@@ -2,7 +2,8 @@ using Maui.AppIntents;
 
 namespace MauiAppIntentsSample.Models;
 
-[AppEntity("TaskItem", TypeDisplayName = "Task")]
+[AppEntity("TaskItem", TypeDisplayName = "Task", Indexed = true,
+    UrlRepresentation = "tasktracker://task/{id}?details={Details}")]
 public class TaskItem
 {
     [AppEntityIdentifier]
@@ -13,6 +14,9 @@ public class TaskItem
 
     [AppEntitySubtitle]
     public string? Notes { get; set; }
+
+    [AppEntityProperty("Details", IndexingKey = "contentDescription")]
+    public string Details { get; set; } = string.Empty;
 
     [AppEntityProperty("Priority")]
     public TaskPriorityLevel Priority { get; set; } = TaskPriorityLevel.Medium;
@@ -31,7 +35,7 @@ public class TaskItem
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 
-[AppEnum("Task Priority")]
+[AppEnum("Task Priority", UrlRepresentation = "tasktracker://priority")]
 public enum TaskPriorityLevel
 {
     [AppEnumCase("Low")]

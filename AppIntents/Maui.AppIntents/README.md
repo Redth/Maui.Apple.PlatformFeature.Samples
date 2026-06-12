@@ -290,6 +290,89 @@ Maui.AppIntents.MauiAppIntentsNative.Donate("CompleteTaskIntent", new
 
 Collections use JSON arrays of the same scalar/entity reference payloads.
 
+## Advanced authoring
+
+These declarative features emit additional static Swift that Apple's metadata extractor reads. They are validated against the Xcode toolchain in the sample build.
+
+### Execution modes (foreground/background)
+
+`SupportedModes` is the modern replacement for the boolean `OpenAppWhenRun`. The generator emits an iOS 26 `supportedModes` extension and keeps `openAppWhenRun` for pre-iOS-26 fallback.
+
+```csharp
+[AppIntent("CreateTaskIntent", Title = "Create Task",
+    SupportedModes = AppIntentExecutionModes.Foreground)]
+```
+
+`Foreground` → `[.foreground]`, `Background` → `[.background]`, `ForegroundAndBackground` → `[.background, .foreground]`.
+
+### Rich and conditional parameter summaries
+
+Replace the single literal `Summary("…")` with one or more `[AppIntentSummary]` attributes. Use `{ParameterName}` tokens to interpolate parameters, and `WhenParameter`/`EqualsValue` for conditional summaries.
+
+```csharp
+[AppIntentSummary("Create {Title}")]
+[AppIntentSummary("Create {Title} as an urgent task",
+    WhenParameter = "Priority", EqualsValue = "Urgent")]
+```
+
+This generates a `When(\.$priority, .equalTo, TaskPriorityLevel.urgent) { Summary(...) } otherwise: { Summary(...) }` chain.
+
+### Typed errors
+
+Return categorized failures so iOS surfaces the right system error. The Swift runtime maps categories to `AppIntentError` cases (iOS 18+) and falls back to a generic error otherwise.
+
+```csharp
+return Task.FromResult(
+    AppIntentResponse.Failed(AppIntentErrorCategory.EntityNotFound, "The task no longer exists."));
+```
+
+Categories include `NetworkFailure`, `NotAllowed`, `UnsupportedOnDevice`, `FeatureRestricted`, `EntityNotFound`, `NeedsSignIn`, `NeedsAccountSetup`, `NeedsConfirmation`, and `Permission*` variants.
+
+### Spotlight indexing
+
+Flag an entity as `Indexed` and tag properties with an indexing key to emit an `IndexedEntity` conformance that builds a `CSSearchableItemAttributeSet`.
+
+```csharp
+[AppEntity("TaskItem", Indexed = true)]
+public sealed class TaskItem
+{
+    [AppEntityProperty("Details", IndexingKey = "contentDescription")]
+    public string Details { get; set; } = "";
+}
+```
+
+Allowed indexing keys: `contentDescription`, `title`, `keywords`.
+
+### URL representations (deep links)
+
+Provide a URL template on an entity or enum to emit `URLRepresentableEntity`/`URLRepresentableEnum`. Use `{id}` for the entity identifier and `{PropertyName}` for `@Property` values.
+
+```csharp
+[AppEntity("TaskItem", UrlRepresentation = "tasktracker://task/{id}?details={Details}")]
+public sealed class TaskItem { /* … */ }
+
+[AppEnum("Task Priority", UrlRepresentation = "tasktracker://priority")]
+public enum TaskPriorityLevel { /* … */ }
+```
+
+### Singleton (unique) entities
+
+For settings-style singletons, set `Unique = true`. The generator emits `UniqueAppEntity` + `UniqueAppEntityQuery` instead of a string query, and the registry's `"unique"` operation returns the first suggested entity.
+
+```csharp
+[AppEntity("TaskTrackerSettings", Unique = true)]
+public sealed class TaskTrackerSettings
+{
+    [AppEntityIdentifier]
+    public string Id { get; set; } = "settings";
+
+    [AppEntityDisplay]
+    public string Title { get; set; } = "Task Tracker Settings";
+}
+```
+
+> **iOS 18 cascade:** `UniqueAppEntity` forces the entity and any intent that references it to iOS 18+. Because `@AppShortcutsBuilder` cannot use `if #available`, such intents are gated with `@available(iOS 18.0, *)` and are **excluded from the generated App Shortcuts provider** (they remain available in the Shortcuts editor and via donation). All other advanced features above are emitted as gated extensions that keep base types at the iOS 17 minimum.
+
 ## Build
 
 Simulator:
@@ -346,6 +429,11 @@ Implemented:
 - Generated `AppEnum`, `AppEntity`, and `EntityStringQuery` declarations.
 - Generated entity `@Property` fields from `[AppEntityProperty]`.
 - Dynamic entity lookup, search, and suggested entities through DI query handlers.
+- Modern `supportedModes`/`IntentModes` execution modes (with `openAppWhenRun` fallback).
+- Rich and conditional `ParameterSummary` expressions via `[AppIntentSummary]`.
+- Typed `AppIntentError` categories via `AppIntentResponse.Failed(AppIntentErrorCategory, …)`.
+- `IndexedEntity` + indexing keys for Spotlight; `URLRepresentableEntity`/`URLRepresentableEnum` deep links.
+- `UniqueAppEntity`/`UniqueAppEntityQuery` singleton entities.
 - Generated native donation entry point via `MauiAppIntentsNative.Donate`.
 - Source-generator diagnostics for malformed authoring patterns.
 - Generated C# registration and native bridge glue.
@@ -355,12 +443,7 @@ Not yet implemented (gaps vs Apple's App Intents framework, 2024–2026):
 
 Declarative gaps (achievable by generating more static Swift from C# metadata):
 
-- Modern `supportedModes`/`IntentModes` (the current idiom replacing the `OpenAppWhenRun` boolean).
-- `IndexedEntity` + `@Property(indexingKey:)` Spotlight indexing.
-- `URLRepresentableIntent`/`URLRepresentableEntity`/`URLRepresentableEnum` deep links.
-- `UniqueAppEntity`/`UniqueAppEntityQuery` singleton entities and `SyncableEntity` cross-device IDs.
-- Rich `ParameterSummary` expressions (only literal `Summary("…")` is generated today).
-- Typed `AppIntentError` categories.
+- `SyncableEntity` cross-device IDs (conformance not present in the installed iOS SDK).
 - Apple Intelligence assistant schemas (`app-schema-domains` via `@AssistantIntent`/`@AssistantEntity`/`@AssistantEnum`) — generatable but the largest declarative workstream.
 
 Bridge/runtime gaps (need new reusable-shim + JSON-dispatch contracts):
