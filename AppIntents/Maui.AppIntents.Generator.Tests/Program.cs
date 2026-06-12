@@ -111,6 +111,17 @@ static void RunValidAuthoringScenario()
             public Task<AppIntentResponse<int>> HandleAsync(Request request, CancellationToken cancellationToken)
                 => Task.FromResult(AppIntentResponse<int>.Succeeded(request.Tasks.Count, "Done"));
         }
+
+        [AppIntent("ImportTaskFileIntent", Title = "Import Task From File")]
+        [AppShortcut("Import a task file", ShortTitle = "Import Task File")]
+        public sealed class ImportTaskFileIntent : IAppIntentHandler<ImportTaskFileIntent.Request, int>
+        {
+            public sealed record Request(
+                [property: IntentParameter("File")] AppIntentFile File);
+
+            public Task<AppIntentResponse<int>> HandleAsync(Request request, CancellationToken cancellationToken)
+                => Task.FromResult(AppIntentResponse<int>.Succeeded(request.File.Data.Length, "Imported"));
+        }
         """);
 
     AssertNoMauiDiagnostics(result.Diagnostics);
@@ -218,6 +229,8 @@ static void RunBuildTaskScenario(Compilation compilation)
 
         AssertContains(swift, "static var supportedModes: IntentModes { [.background] }");
         AssertContains(swift, "try await requestConfirmation(actionName: .set, dialog: IntentDialog(\"Complete these tasks?\"))");
+        AssertContains(swift, "var file: IntentFile");
+        AssertContains(swift, "file.data.base64EncodedString()");
         AssertContains(swift, "extension TaskItemEntity: IndexedEntity");
         AssertContains(swift, "set.contentDescription");
         AssertContains(swift, "extension TaskItemEntity: URLRepresentableEntity");

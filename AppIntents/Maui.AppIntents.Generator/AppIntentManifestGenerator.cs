@@ -356,6 +356,10 @@ public sealed class AppIntentManifestGenerator : IIncrementalGenerator
                         Report(sourceContext, MissingEntityQueryDiagnostic, property, appEntity.FullName);
                     }
                 }
+                else if (DisplayName(unwrappedType) == "Maui.AppIntents.AppIntentFile")
+                {
+                    parameter.Kind = "File";
+                }
                 else if (!IsSupportedScalarKind(parameter.Kind))
                 {
                     Report(sourceContext, UnsupportedParameterDiagnostic, property, property.Name, DisplayName(property.Type));

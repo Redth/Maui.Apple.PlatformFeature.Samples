@@ -698,6 +698,11 @@ func mauiAppIntentError(_ category: String?, _ message: String) -> Error {
                 sb.AppendLine("            let intent = " + SwiftTypeName(intent.Identifier) + "()");
                 foreach (var parameter in intent.Parameters)
                 {
+                    if (parameter.Kind == "File")
+                    {
+                        continue;
+                    }
+
                     sb.AppendLine("    " + DonationAssignment(parameter, manifest));
                 }
                 sb.AppendLine("            donateGeneratedIntent(intent)");
@@ -710,6 +715,11 @@ func mauiAppIntentError(_ category: String?, _ message: String) -> Error {
                 sb.AppendLine("        let intent = " + SwiftTypeName(intent.Identifier) + "()");
                 foreach (var parameter in intent.Parameters)
                 {
+                    if (parameter.Kind == "File")
+                    {
+                        continue;
+                    }
+
                     sb.AppendLine(DonationAssignment(parameter, manifest));
                 }
                 sb.AppendLine("        donateGeneratedIntent(intent)");
@@ -1207,8 +1217,16 @@ date -u +%Y-%m-%dT%H:%M:%SZ > ""$BUILD_DIR/appintents-build.stamp""
             "Date" => "Date",
             "Enum" => SwiftTypeName(manifest.AppEnums.First(e => e.FullName == enumTypeName).Name),
             "Entity" => SwiftEntityTypeName(manifest.AppEntities.First(e => e.FullName == entityTypeName)),
+            "File" => "IntentFile",
             _ => "String"
         };
+    }
+
+    private const string FilePayloadMap = "{ [\"data\": $0.data.base64EncodedString(), \"filename\": $0.filename, \"contentType\": $0.type?.identifier ?? \"\"] }";
+
+    private static string FilePayloadLiteral(string name)
+    {
+        return "[\"data\": " + name + ".data.base64EncodedString(), \"filename\": " + name + ".filename, \"contentType\": " + name + ".type?.identifier ?? \"\"]";
     }
 
     private static string PayloadExpression(ParameterModel parameter)
@@ -1220,6 +1238,7 @@ date -u +%Y-%m-%dT%H:%M:%SZ > ""$BUILD_DIR/appintents-build.stamp""
                 "Enum" => parameter.SwiftName + ".map { $0.rawValue }",
                 "Entity" => parameter.SwiftName + ".map { $0.payload() }",
                 "Date" => parameter.SwiftName + ".map { ISO8601DateFormatter().string(from: $0) }",
+                "File" => parameter.SwiftName + ".map " + FilePayloadMap,
                 _ => parameter.SwiftName
             };
 
@@ -1238,6 +1257,13 @@ date -u +%Y-%m-%dT%H:%M:%SZ > ""$BUILD_DIR/appintents-build.stamp""
             return parameter.IsOptional
                 ? parameter.SwiftName + ".map { $0.payload() } ?? NSNull()"
                 : parameter.SwiftName + ".payload()";
+        }
+
+        if (parameter.Kind == "File")
+        {
+            return parameter.IsOptional
+                ? parameter.SwiftName + ".map " + FilePayloadMap + " ?? NSNull()"
+                : FilePayloadLiteral(parameter.SwiftName);
         }
 
         if (parameter.IsOptional)

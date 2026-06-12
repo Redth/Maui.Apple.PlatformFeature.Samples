@@ -304,6 +304,7 @@ These optional features emit extra static Swift the metadata extractor reads. Al
 - **Deep links:** `[AppEntity(UrlRepresentation = "app://task/{id}?x={Prop}")]` / `[AppEnum(UrlRepresentation = "app://priority")]` → `URLRepresentableEntity`/`URLRepresentableEnum`.
 - **Singletons:** `[AppEntity(Unique = true)]` → `UniqueAppEntity` + `UniqueAppEntityQuery`.
 - **Confirmation:** `[AppIntent(RequiresConfirmation = true, ConfirmationDialog = "…", ConfirmationActionName = AppIntentConfirmationAction.Set)]` emits a gated (iOS 18+) `requestConfirmation(actionName:dialog:)` at the start of the generated `perform()`, before the C# handler runs.
+- **File inputs:** declare a parameter of type `AppIntentFile` → Swift `IntentFile`; file bytes arrive in C# as `byte[] Data` (with `FileName`/`ContentType`). `List<AppIntentFile>` works for multi-file. Excluded from donations.
 
 > **iOS 18 cascade gotcha:** `UniqueAppEntity` forces its entity and any referencing intent to iOS 18+. Because `@AppShortcutsBuilder` cannot use `if #available`, those intents are gated `@available(iOS 18.0, *)` and **excluded from the generated App Shortcuts provider** (still available in the Shortcuts editor and via donation). Every other advanced feature is emitted as a gated extension that keeps base types at the iOS 17 minimum, so it does not affect shortcuts.
 
@@ -325,10 +326,10 @@ Use the legacy Swift framework + binding library pattern when the generated pack
 - Apple Intelligence assistant schemas (`app-schema-domains` / `@AssistantIntent`/`@AssistantEntity`/`@AssistantEnum`).
 - `SyncableEntity` (conformance not present in the installed iOS SDK).
 - Interaction flow beyond confirmation: `requestValue`/disambiguation and conditional `requestConfirmation(conditions:)`. (Pre-execution `requestConfirmation` **is** supported via `RequiresConfirmation`.) Also: real cancellation (`CancellableIntent`), `LongRunningIntent`/progress, `UndoableIntent`.
-- `IntentFile`/`FileEntity` parameters, `Transferable`/`NSUserActivity` onscreen awareness, `EntityPropertyQuery`, `DynamicOptionsProvider`, `AppUnionValue`/`@UnionValue`, `EntityCollection`.
+- `FileEntity`, `Transferable`/`NSUserActivity` onscreen awareness, `EntityPropertyQuery`, `DynamicOptionsProvider`, `AppUnionValue`/`@UnionValue`, `EntityCollection`. (`IntentFile` file-input parameters **are** supported via `AppIntentFile`.)
 - Out-of-process App Intents extension + `allowedExecutionTargets`, interactive snippets / snippet views (`SnippetIntent`), controls/camera/audio intents, `PredictableIntent`.
 
-The generated path **does** now cover (no fallback needed): `supportedModes`/`IntentModes`, rich/conditional `ParameterSummary`, typed `AppIntentError` categories, `IndexedEntity` Spotlight indexing, `URLRepresentable*` deep links, `UniqueAppEntity`, and pre-execution `requestConfirmation`.
+The generated path **does** now cover (no fallback needed): `supportedModes`/`IntentModes`, rich/conditional `ParameterSummary`, typed `AppIntentError` categories, `IndexedEntity` Spotlight indexing, `URLRepresentable*` deep links, `UniqueAppEntity`, pre-execution `requestConfirmation`, and `IntentFile` file-input parameters.
 
 See `plan.md` ("Audit: C#-first App Intents vs Apple documentation (2024–2026)") in the session/research notes for the full feature matrix and the phased gap roadmap (G1 declarative quick wins → G2 bridge interaction/lifecycle → G3 assistant schemas → G4 architectural/UI).
 

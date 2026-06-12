@@ -391,6 +391,28 @@ public sealed class CompleteGeneratedTaskIntent : IAppIntentHandler<CompleteGene
 
 `ConfirmationDialog` defaults to the intent title when omitted. `ConfirmationActionName` maps to Apple's `ConfirmationActionName` verbs (`Continue`, `Set`, `Buy`, `Send`, `Delete`-style actions, etc.) used to label the confirmation button.
 
+### File input parameters
+
+Declare a parameter of type `AppIntentFile` to receive a file from another app, the share sheet, or the Files app. The generator maps it to Apple's `IntentFile` parameter, and the file bytes are bridged to C# as a base64 payload, exposed as `byte[] Data` along with `FileName` and `ContentType`.
+
+```csharp
+[AppIntent("ImportTaskFileIntent", Title = "Import Task From File")]
+public sealed class ImportTaskFileIntent : IAppIntentHandler<ImportTaskFileIntent.Request, AppEntityReference<TaskItem>>
+{
+    public sealed record Request(
+        [property: IntentParameter("File")] AppIntentFile File);
+
+    public Task<AppIntentResponse<AppEntityReference<TaskItem>>> HandleAsync(Request request, CancellationToken cancellationToken)
+    {
+        var bytes = request.File.Data;       // raw file content
+        var name = request.File.FileName;    // e.g. "notes.txt"
+        // ...
+    }
+}
+```
+
+`List<AppIntentFile>` is also supported for multi-file inputs. File parameters are excluded from generated donations (a file payload cannot be reconstructed for a donated intent).
+
 ## Build
 
 Simulator:
@@ -453,6 +475,7 @@ Implemented:
 - `IndexedEntity` + indexing keys for Spotlight; `URLRepresentableEntity`/`URLRepresentableEnum` deep links.
 - `UniqueAppEntity`/`UniqueAppEntityQuery` singleton entities.
 - Pre-execution confirmation via `[AppIntent(RequiresConfirmation = true, …)]` → gated `requestConfirmation`.
+- `IntentFile` file-input parameters via the `AppIntentFile` parameter type (single or `List<>`).
 - Generated native donation entry point via `MauiAppIntentsNative.Donate`.
 - Source-generator diagnostics for malformed authoring patterns.
 - Generated C# registration and native bridge glue.
@@ -469,7 +492,7 @@ Bridge/runtime gaps (need new reusable-shim + JSON-dispatch contracts):
 
 - Interaction flow: `requestConfirmation` pre-execution confirmation is **implemented** (`RequiresConfirmation`); conditional `requestConfirmation(conditions:)`, `requestValue`, and disambiguation are not yet.
 - Real cancellation (`CancellableIntent`/`IntentCancellationReason`) wired into the handler `CancellationToken`.
-- `LongRunningIntent`/progress, `UndoableIntent`, `IntentFile`/`FileEntity` parameters.
+- `LongRunningIntent`/progress, `UndoableIntent`. (`IntentFile` file-input parameters are **implemented** via `AppIntentFile`; `FileEntity` is not yet.)
 - `Transferable`/`NSUserActivity` onscreen awareness, `EntityPropertyQuery`, `DynamicOptionsProvider`, `EntityCollection`, `AppUnionValue`/`@UnionValue`, `OwnershipProvidingEntity`, `RelevantEntities`.
 
 Architectural / UI gaps (separate effort, may need hand-authored Swift):
