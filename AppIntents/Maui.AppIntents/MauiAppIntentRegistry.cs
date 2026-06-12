@@ -132,6 +132,32 @@ public sealed class MauiAppIntentRegistry
         };
     }
 
+    public void MapOptions<TProvider>(string identifier, IServiceProvider services)
+        where TProvider : IAppIntentOptionsProvider
+    {
+        if (string.IsNullOrWhiteSpace(identifier))
+        {
+            throw new ArgumentException("Options provider identifier cannot be empty.", nameof(identifier));
+        }
+
+        _entityQueries[identifier] = async (operation, payload, cancellationToken) =>
+        {
+            var provider = services.GetRequiredService<TProvider>();
+            var options = await provider.GetOptionsAsync(cancellationToken).ConfigureAwait(false);
+            return new AppIntentEntityQueryResponse
+            {
+                Entities = options
+                    .Where(static option => option != null && !string.IsNullOrWhiteSpace(option.Value))
+                    .Select(static option => new AppIntentEntityValue
+                    {
+                        Id = option.Value,
+                        Display = string.IsNullOrWhiteSpace(option.Display) ? option.Value : option.Display!
+                    })
+                    .ToList()
+            };
+        };
+    }
+
     public async Task<string> DispatchToJsonAsync(string identifier, string payload, CancellationToken cancellationToken = default)
     {
         if (!_handlers.TryGetValue(identifier, out var handler))

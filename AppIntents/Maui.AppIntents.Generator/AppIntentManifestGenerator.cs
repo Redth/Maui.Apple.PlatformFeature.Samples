@@ -26,6 +26,8 @@ public sealed class AppIntentManifestGenerator : IIncrementalGenerator
     private const string AppEntitySubtitleAttributeName = "Maui.AppIntents.AppEntitySubtitleAttribute";
     private const string AppEntityPropertyAttributeName = "Maui.AppIntents.AppEntityPropertyAttribute";
     private const string AppEntityQueryHandlerAttributeName = "Maui.AppIntents.AppEntityQueryHandlerAttribute";
+    private const string AppIntentOptionsProviderAttributeName = "Maui.AppIntents.AppIntentOptionsProviderAttribute";
+    private const string AppIntentOptionsProviderInterfaceName = "Maui.AppIntents.IAppIntentOptionsProvider";
     private const string AppEntityReferenceTypeName = "Maui.AppIntents.AppEntityReference<TEntity>";
     private const string AppIntentHandlerTypeName = "Maui.AppIntents.IAppIntentHandler<TRequest>";
     private const string AppIntentHandlerWithResultTypeName = "Maui.AppIntents.IAppIntentHandler<TRequest, TResult>";
@@ -74,6 +76,14 @@ public sealed class AppIntentManifestGenerator : IIncrementalGenerator
         "MAUIAI006",
         "Generated identifier is invalid",
         "'{0}' should contain at least one letter or digit so it can generate a stable Swift identifier",
+        "Maui.AppIntents",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    private static readonly DiagnosticDescriptor InvalidOptionsProviderDiagnostic = new DiagnosticDescriptor(
+        "MAUIAI007",
+        "Options provider reference is invalid",
+        "Parameter '{0}' references options provider '{1}', but no string parameter can use it: options providers only apply to non-optional string parameters and the identifier must match a type marked with [AppIntentOptionsProvider]",
         "Maui.AppIntents",
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
@@ -253,6 +263,38 @@ public sealed class AppIntentManifestGenerator : IIncrementalGenerator
 
         appModel.AppEntities.AddRange(appEntities.Values.OrderBy(static e => e.FullName, StringComparer.Ordinal));
 
+        var optionsProviders = new Dictionary<string, OptionsProviderModel>(StringComparer.Ordinal);
+        foreach (var typeSymbol in typeSymbols.OfType<INamedTypeSymbol>())
+        {
+            var providerAttribute = GetAttribute(typeSymbol, AppIntentOptionsProviderAttributeName);
+            if (providerAttribute is null)
+            {
+                continue;
+            }
+
+            if (!ImplementsInterface(typeSymbol, AppIntentOptionsProviderInterfaceName))
+            {
+                continue;
+            }
+
+            var providerIdentifier = GetConstructorString(providerAttribute, 0);
+            if (string.IsNullOrWhiteSpace(providerIdentifier) || !CanGenerateIdentifier(providerIdentifier!))
+            {
+                continue;
+            }
+
+            if (!optionsProviders.ContainsKey(providerIdentifier!))
+            {
+                optionsProviders[providerIdentifier!] = new OptionsProviderModel
+                {
+                    Identifier = providerIdentifier!,
+                    ProviderType = DisplayName(typeSymbol)
+                };
+            }
+        }
+
+        appModel.OptionsProviders.AddRange(optionsProviders.Values.OrderBy(static p => p.Identifier, StringComparer.Ordinal));
+
         foreach (var classSymbol in typeSymbols.OfType<INamedTypeSymbol>())
         {
             var appIntentAttribute = GetAttribute(classSymbol, AppIntentAttributeName);
@@ -366,6 +408,22 @@ public sealed class AppIntentManifestGenerator : IIncrementalGenerator
                     continue;
                 }
 
+                var optionsProviderId = GetNamedString(parameterAttribute, "OptionsProvider");
+                if (!string.IsNullOrWhiteSpace(optionsProviderId))
+                {
+                    if (parameter.Kind == "String" &&
+                        !parameter.IsOptional &&
+                        !parameter.IsCollection &&
+                        optionsProviders.ContainsKey(optionsProviderId!))
+                    {
+                        parameter.OptionsProviderId = optionsProviderId!;
+                    }
+                    else
+                    {
+                        Report(sourceContext, InvalidOptionsProviderDiagnostic, property, property.Name, optionsProviderId!);
+                    }
+                }
+
                 intent.Parameters.Add(parameter);
             }
 
@@ -422,6 +480,10 @@ public sealed class AppIntentManifestGenerator : IIncrementalGenerator
                 sb.AppendLine("            }");
             }
             sb.AppendLine("        });");
+        }
+        foreach (var provider in model.OptionsProviders)
+        {
+            sb.AppendLine("        registry.MapOptions<global::" + provider.ProviderType + ">(\"" + EscapeCSharp(provider.Identifier) + "\", services);");
         }
         foreach (var intent in model.Intents)
         {
@@ -791,6 +853,13 @@ public static class MauiAppIntentsNative
         return symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat).Replace("global::", "");
     }
 
+    private static bool ImplementsInterface(INamedTypeSymbol typeSymbol, string interfaceFullName)
+    {
+        return typeSymbol.AllInterfaces.Any(i =>
+            string.Equals(i.OriginalDefinition.ToDisplayString(), interfaceFullName, StringComparison.Ordinal) ||
+            string.Equals(i.ToDisplayString(), interfaceFullName, StringComparison.Ordinal));
+    }
+
     private static string SourceTypeName(string displayName)
     {
         return displayName switch
@@ -1026,6 +1095,15 @@ internal sealed class AppIntentsModel
     public List<AppEnumModel> AppEnums { get; } = new();
 
     public List<AppEntityModel> AppEntities { get; } = new();
+
+    public List<OptionsProviderModel> OptionsProviders { get; } = new();
+}
+
+internal sealed class OptionsProviderModel
+{
+    public string Identifier { get; set; } = "";
+
+    public string ProviderType { get; set; } = "";
 }
 
 internal sealed class IntentModel
@@ -1103,6 +1181,8 @@ internal sealed class ParameterModel
     public string EnumTypeName { get; set; } = "";
 
     public string EntityTypeName { get; set; } = "";
+
+    public string OptionsProviderId { get; set; } = "";
 }
 
 internal sealed class ShortcutModel
@@ -1199,8 +1279,19 @@ internal static class ManifestJsonWriter
         WriteArray(sb, "appEnums", model.AppEnums, WriteAppEnum);
         sb.Append(',');
         WriteArray(sb, "appEntities", model.AppEntities, WriteAppEntity);
+        sb.Append(',');
+        WriteArray(sb, "optionsProviders", model.OptionsProviders, WriteOptionsProvider);
         sb.Append('}');
         return sb.ToString();
+    }
+
+    private static void WriteOptionsProvider(StringBuilder sb, OptionsProviderModel provider)
+    {
+        sb.Append('{');
+        WriteProperty(sb, "identifier", provider.Identifier);
+        sb.Append(',');
+        WriteProperty(sb, "providerType", provider.ProviderType);
+        sb.Append('}');
     }
 
     private static void WriteIntent(StringBuilder sb, IntentModel intent)
@@ -1283,6 +1374,8 @@ internal static class ManifestJsonWriter
         WriteProperty(sb, "enumTypeName", parameter.EnumTypeName);
         sb.Append(',');
         WriteProperty(sb, "entityTypeName", parameter.EntityTypeName);
+        sb.Append(',');
+        WriteProperty(sb, "optionsProviderId", parameter.OptionsProviderId);
         sb.Append('}');
     }
 

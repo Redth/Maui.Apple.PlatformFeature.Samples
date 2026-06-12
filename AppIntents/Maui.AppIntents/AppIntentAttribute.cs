@@ -165,6 +165,28 @@ public sealed class IntentParameterAttribute : Attribute
     public double InclusiveMinimum { get; set; } = double.NaN;
 
     public double InclusiveMaximum { get; set; } = double.NaN;
+
+    /// <summary>
+    /// The identifier of an <see cref="IAppIntentOptionsProvider"/> (declared via
+    /// <see cref="AppIntentOptionsProviderAttribute"/>) that supplies dynamic options for this
+    /// string parameter. Maps to a generated Swift <c>DynamicOptionsProvider</c>.
+    /// </summary>
+    public string? OptionsProvider { get; set; }
+}
+
+/// <summary>
+/// Marks a type implementing <see cref="IAppIntentOptionsProvider"/> with the identifier used to
+/// link it to intent parameters via <c>[IntentParameter("…", OptionsProvider = "&lt;identifier&gt;")]</c>.
+/// </summary>
+[AttributeUsage(AttributeTargets.Class, AllowMultiple = false, Inherited = false)]
+public sealed class AppIntentOptionsProviderAttribute : Attribute
+{
+    public AppIntentOptionsProviderAttribute(string identifier)
+    {
+        Identifier = identifier;
+    }
+
+    public string Identifier { get; }
 }
 
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Struct, AllowMultiple = false, Inherited = false)]

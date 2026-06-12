@@ -27,6 +27,7 @@ public static class MauiProgram
 		builder.Services.AddTransient<CompleteGeneratedTasksIntent>();
 		builder.Services.AddTransient<ListGeneratedTasksIntent>();
 		builder.Services.AddTransient<TaskItemQueryHandler>();
+		builder.Services.AddTransient<TaskTagOptionsProvider>();
 		builder.Services.AddMauiAppIntents();
 #if IOS
 		builder.Services.AddSingleton<IIntentDonationService, Platforms.iOS.IntentDonationService>();

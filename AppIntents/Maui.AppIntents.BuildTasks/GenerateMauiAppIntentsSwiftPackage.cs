@@ -567,6 +567,17 @@ func mauiAppIntentError(_ category: String?, _ message: String) -> Error {
             }
         }
 
+        foreach (var provider in ReferencedOptionsProviders(manifest))
+        {
+            sb.AppendLine("struct " + OptionsProviderStructName(provider.Identifier) + ": DynamicOptionsProvider {");
+            sb.AppendLine("    func results() async throws -> [String] {");
+            sb.AppendLine("        let entities = (try? MauiAppIntentBridge.shared.query(identifier: \"" + EscapeSwift(provider.Identifier) + "\", operation: \"suggested\", payload: [:])) ?? []");
+            sb.AppendLine("        return entities.map { $0.id }");
+            sb.AppendLine("    }");
+            sb.AppendLine("}");
+            sb.AppendLine();
+        }
+
         foreach (var intent in manifest.Intents)
         {
             var intentGated = IntentReferencesUnique(intent, manifest);
@@ -590,7 +601,12 @@ func mauiAppIntentError(_ category: String?, _ message: String) -> Error {
                 {
                     range = ", inclusiveRange: (" + parameter.Minimum.Value.ToString(CultureInfo.InvariantCulture) + ", " + parameter.Maximum.Value.ToString(CultureInfo.InvariantCulture) + ")";
                 }
-                sb.AppendLine("    @Parameter(title: \"" + EscapeSwift(parameter.Title) + "\"" + range + ")");
+                var optionsClause = "";
+                if (parameter.Kind == "String" && !parameter.IsOptional && !parameter.IsCollection && !string.IsNullOrWhiteSpace(parameter.OptionsProviderId))
+                {
+                    optionsClause = ", optionsProvider: " + OptionsProviderStructName(parameter.OptionsProviderId) + "()";
+                }
+                sb.AppendLine("    @Parameter(title: \"" + EscapeSwift(parameter.Title) + "\"" + range + optionsClause + ")");
                 sb.AppendLine("    var " + parameter.SwiftName + ": " + SwiftType(parameter, manifest));
                 sb.AppendLine();
             }
@@ -1406,6 +1422,28 @@ date -u +%Y-%m-%dT%H:%M:%SZ > ""$BUILD_DIR/appintents-build.stamp""
         return SanitizeIdentifier(value);
     }
 
+    private static string OptionsProviderStructName(string identifier)
+    {
+        return UpperFirst(SwiftTypeName(identifier)) + "OptionsProvider";
+    }
+
+    private static List<OptionsProviderModel> ReferencedOptionsProviders(AppIntentsManifest manifest)
+    {
+        var referenced = new HashSet<string>(
+            manifest.Intents
+                .SelectMany(intent => intent.Parameters)
+                .Where(parameter => parameter.Kind == "String" && !parameter.IsOptional && !parameter.IsCollection && !string.IsNullOrWhiteSpace(parameter.OptionsProviderId))
+                .Select(parameter => parameter.OptionsProviderId),
+            StringComparer.Ordinal);
+
+        return manifest.OptionsProviders
+            .Where(provider => referenced.Contains(provider.Identifier))
+            .GroupBy(provider => provider.Identifier, StringComparer.Ordinal)
+            .Select(group => group.First())
+            .OrderBy(provider => provider.Identifier, StringComparer.Ordinal)
+            .ToList();
+    }
+
     private static string SwiftEntityTypeName(AppEntityModel entity)
     {
         return SwiftTypeName(entity.Identifier) + "Entity";
@@ -1430,6 +1468,11 @@ date -u +%Y-%m-%dT%H:%M:%SZ > ""$BUILD_DIR/appintents-build.stamp""
     private static string LowerFirst(string value)
     {
         return string.IsNullOrEmpty(value) ? value : char.ToLowerInvariant(value[0]) + value.Substring(1);
+    }
+
+    private static string UpperFirst(string value)
+    {
+        return string.IsNullOrEmpty(value) ? value : char.ToUpperInvariant(value[0]) + value.Substring(1);
     }
 
     private static string EscapeSwift(string value)
@@ -1488,6 +1531,15 @@ public sealed class AppIntentsManifest
     public List<AppEnumModel> AppEnums { get; set; } = new List<AppEnumModel>();
 
     public List<AppEntityModel> AppEntities { get; set; } = new List<AppEntityModel>();
+
+    public List<OptionsProviderModel> OptionsProviders { get; set; } = new List<OptionsProviderModel>();
+}
+
+public sealed class OptionsProviderModel
+{
+    public string Identifier { get; set; } = "";
+
+    public string ProviderType { get; set; } = "";
 }
 
 public sealed class IntentModel
@@ -1565,6 +1617,8 @@ public sealed class ParameterModel
     public string EnumTypeName { get; set; } = "";
 
     public string EntityTypeName { get; set; } = "";
+
+    public string OptionsProviderId { get; set; } = "";
 }
 
 public sealed class ShortcutModel

@@ -413,6 +413,33 @@ public sealed class ImportTaskFileIntent : IAppIntentHandler<ImportTaskFileInten
 
 `List<AppIntentFile>` is also supported for multi-file inputs. File parameters are excluded from generated donations (a file payload cannot be reconstructed for a donated intent).
 
+### Dynamic options for string parameters
+
+Entity query handlers supply options for entity-backed parameters. For plain **string** parameters, implement `IAppIntentOptionsProvider` and mark it with `[AppIntentOptionsProvider("<identifier>")]`, then link it to a parameter with `OptionsProvider`. The generator emits a Swift `DynamicOptionsProvider`, and the option list is produced by your C# code at suggestion time (so it can reflect live app state).
+
+```csharp
+[AppIntentOptionsProvider("taskTags")]
+public sealed class TaskTagOptionsProvider : IAppIntentOptionsProvider
+{
+    private readonly ITaskService tasks;
+
+    public TaskTagOptionsProvider(ITaskService tasks) => this.tasks = tasks;
+
+    public Task<IReadOnlyList<AppIntentOption>> GetOptionsAsync(CancellationToken cancellationToken)
+    {
+        IReadOnlyList<AppIntentOption> options = new[] { "Work", "Home", "Errand" }
+            .Select(t => new AppIntentOption(t))   // optional second arg sets a display label
+            .ToList();
+        return Task.FromResult(options);
+    }
+}
+
+// On the intent's Request:
+[property: IntentParameter("Tag", OptionsProvider = "taskTags")] string Tag
+```
+
+Register the provider in DI (`builder.Services.AddTransient<TaskTagOptionsProvider>();`). Options providers apply to **non-optional, non-collection string** parameters only; the identifier must match a `[AppIntentOptionsProvider]` type or the generator reports `MAUIAI007`.
+
 ## Build
 
 Simulator:
@@ -476,6 +503,7 @@ Implemented:
 - `UniqueAppEntity`/`UniqueAppEntityQuery` singleton entities.
 - Pre-execution confirmation via `[AppIntent(RequiresConfirmation = true, …)]` → gated `requestConfirmation`.
 - `IntentFile` file-input parameters via the `AppIntentFile` parameter type (single or `List<>`).
+- Dynamic options for string parameters via `IAppIntentOptionsProvider` → generated `DynamicOptionsProvider`.
 - Generated native donation entry point via `MauiAppIntentsNative.Donate`.
 - Source-generator diagnostics for malformed authoring patterns.
 - Generated C# registration and native bridge glue.
@@ -493,7 +521,7 @@ Bridge/runtime gaps (need new reusable-shim + JSON-dispatch contracts):
 - Interaction flow: `requestConfirmation` pre-execution confirmation is **implemented** (`RequiresConfirmation`); conditional `requestConfirmation(conditions:)`, `requestValue`, and disambiguation are not yet.
 - Real cancellation (`CancellableIntent`/`IntentCancellationReason`) wired into the handler `CancellationToken`.
 - `LongRunningIntent`/progress, `UndoableIntent`. (`IntentFile` file-input parameters are **implemented** via `AppIntentFile`; `FileEntity` is not yet.)
-- `Transferable`/`NSUserActivity` onscreen awareness, `EntityPropertyQuery`, `DynamicOptionsProvider`, `EntityCollection`, `AppUnionValue`/`@UnionValue`, `OwnershipProvidingEntity`, `RelevantEntities`.
+- `Transferable`/`NSUserActivity` onscreen awareness, `EntityPropertyQuery`, `EntityCollection`, `AppUnionValue`/`@UnionValue`, `OwnershipProvidingEntity`, `RelevantEntities`. (`DynamicOptionsProvider` for string parameters is **implemented** via `IAppIntentOptionsProvider`.)
 
 Architectural / UI gaps (separate effort, may need hand-authored Swift):
 

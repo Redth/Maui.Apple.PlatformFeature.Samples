@@ -112,12 +112,20 @@ static void RunValidAuthoringScenario()
                 => Task.FromResult(AppIntentResponse<int>.Succeeded(request.Tasks.Count, "Done"));
         }
 
+        [AppIntentOptionsProvider("taskTags")]
+        public sealed class TaskTagOptionsProvider : IAppIntentOptionsProvider
+        {
+            public Task<IReadOnlyList<AppIntentOption>> GetOptionsAsync(CancellationToken cancellationToken)
+                => Task.FromResult<IReadOnlyList<AppIntentOption>>(new List<AppIntentOption> { new AppIntentOption("Work") });
+        }
+
         [AppIntent("ImportTaskFileIntent", Title = "Import Task From File")]
         [AppShortcut("Import a task file", ShortTitle = "Import Task File")]
         public sealed class ImportTaskFileIntent : IAppIntentHandler<ImportTaskFileIntent.Request, int>
         {
             public sealed record Request(
-                [property: IntentParameter("File")] AppIntentFile File);
+                [property: IntentParameter("File")] AppIntentFile File,
+                [property: IntentParameter("Tag", OptionsProvider = "taskTags")] string Tag);
 
             public Task<AppIntentResponse<int>> HandleAsync(Request request, CancellationToken cancellationToken)
                 => Task.FromResult(AppIntentResponse<int>.Succeeded(request.File.Data.Length, "Imported"));
@@ -133,6 +141,7 @@ static void RunValidAuthoringScenario()
     AssertContains(generated, "isCollection");
     AssertContains(generated, "priority");
     AssertContains(generated, "registry.Map<global::Sample.CompleteTasksIntent.Request, global::Sample.CompleteTasksIntent, int>");
+    AssertContains(generated, "registry.MapOptions<global::Sample.TaskTagOptionsProvider>(\"taskTags\", services)");
 
     RunBuildTaskScenario(result.OutputCompilation);
 }
@@ -231,6 +240,9 @@ static void RunBuildTaskScenario(Compilation compilation)
         AssertContains(swift, "try await requestConfirmation(actionName: .set, dialog: IntentDialog(\"Complete these tasks?\"))");
         AssertContains(swift, "var file: IntentFile");
         AssertContains(swift, "file.data.base64EncodedString()");
+        AssertContains(swift, "struct TaskTagsOptionsProvider: DynamicOptionsProvider");
+        AssertContains(swift, "optionsProvider: TaskTagsOptionsProvider()");
+        AssertContains(swift, "query(identifier: \"taskTags\", operation: \"suggested\"");
         AssertContains(swift, "extension TaskItemEntity: IndexedEntity");
         AssertContains(swift, "set.contentDescription");
         AssertContains(swift, "extension TaskItemEntity: URLRepresentableEntity");

@@ -305,6 +305,7 @@ These optional features emit extra static Swift the metadata extractor reads. Al
 - **Singletons:** `[AppEntity(Unique = true)]` → `UniqueAppEntity` + `UniqueAppEntityQuery`.
 - **Confirmation:** `[AppIntent(RequiresConfirmation = true, ConfirmationDialog = "…", ConfirmationActionName = AppIntentConfirmationAction.Set)]` emits a gated (iOS 18+) `requestConfirmation(actionName:dialog:)` at the start of the generated `perform()`, before the C# handler runs.
 - **File inputs:** declare a parameter of type `AppIntentFile` → Swift `IntentFile`; file bytes arrive in C# as `byte[] Data` (with `FileName`/`ContentType`). `List<AppIntentFile>` works for multi-file. Excluded from donations.
+- **Dynamic string options:** implement `IAppIntentOptionsProvider` + `[AppIntentOptionsProvider("id")]`, then `[IntentParameter("…", OptionsProvider = "id")]` on a non-optional string parameter → Swift `DynamicOptionsProvider`. Options are produced by your C# at suggestion time. Register the provider type in DI.
 
 > **iOS 18 cascade gotcha:** `UniqueAppEntity` forces its entity and any referencing intent to iOS 18+. Because `@AppShortcutsBuilder` cannot use `if #available`, those intents are gated `@available(iOS 18.0, *)` and **excluded from the generated App Shortcuts provider** (still available in the Shortcuts editor and via donation). Every other advanced feature is emitted as a gated extension that keeps base types at the iOS 17 minimum, so it does not affect shortcuts.
 
@@ -314,7 +315,7 @@ These optional features emit extra static Swift the metadata extractor reads. Al
 2. **Entity query handlers must be fast.** Query methods may be called by Shortcuts UI and Siri disambiguation. Use lightweight app-service calls and avoid long UI-thread work.
 3. **Entity query bridge failures return empty results.** Generated Swift catches bridge-not-ready and query errors for `EntityStringQuery` methods so parameter pickers degrade instead of throwing user-visible errors.
 4. **`AppEntityReference<TEntity>` is a reference, not a model.** Re-fetch by `Id` in handlers.
-5. **Generated diagnostics are intentional guardrails.** Fix `MAUIAI001`-`MAUIAI006` authoring diagnostics instead of suppressing them; they identify missing request types, unsupported parameter/result shapes, invalid identifiers, and handler/query mismatches.
+5. **Generated diagnostics are intentional guardrails.** Fix `MAUIAI001`-`MAUIAI007` authoring diagnostics instead of suppressing them; they identify missing request types, unsupported parameter/result shapes, invalid identifiers, handler/query mismatches, and invalid options-provider references.
 6. **Module names must be stable Swift identifiers.** Set `MauiAppIntentsModuleName` if the default project-derived name is not acceptable.
 7. **Metadata must be inside the app bundle.** If intents do not appear, inspect `{App}.app/Metadata.appintents/`.
 8. **Siri voice still needs entitlements/provisioning.** Shortcuts app execution can work while Siri voice fails if the app or provisioning profile lacks Siri capability.
@@ -326,10 +327,10 @@ Use the legacy Swift framework + binding library pattern when the generated pack
 - Apple Intelligence assistant schemas (`app-schema-domains` / `@AssistantIntent`/`@AssistantEntity`/`@AssistantEnum`).
 - `SyncableEntity` (conformance not present in the installed iOS SDK).
 - Interaction flow beyond confirmation: `requestValue`/disambiguation and conditional `requestConfirmation(conditions:)`. (Pre-execution `requestConfirmation` **is** supported via `RequiresConfirmation`.) Also: real cancellation (`CancellableIntent`), `LongRunningIntent`/progress, `UndoableIntent`.
-- `FileEntity`, `Transferable`/`NSUserActivity` onscreen awareness, `EntityPropertyQuery`, `DynamicOptionsProvider`, `AppUnionValue`/`@UnionValue`, `EntityCollection`. (`IntentFile` file-input parameters **are** supported via `AppIntentFile`.)
+- `FileEntity`, `Transferable`/`NSUserActivity` onscreen awareness, `EntityPropertyQuery`, `AppUnionValue`/`@UnionValue`, `EntityCollection`. (`IntentFile` file-input parameters **are** supported via `AppIntentFile`; `DynamicOptionsProvider` for string parameters **is** supported via `IAppIntentOptionsProvider`.)
 - Out-of-process App Intents extension + `allowedExecutionTargets`, interactive snippets / snippet views (`SnippetIntent`), controls/camera/audio intents, `PredictableIntent`.
 
-The generated path **does** now cover (no fallback needed): `supportedModes`/`IntentModes`, rich/conditional `ParameterSummary`, typed `AppIntentError` categories, `IndexedEntity` Spotlight indexing, `URLRepresentable*` deep links, `UniqueAppEntity`, pre-execution `requestConfirmation`, and `IntentFile` file-input parameters.
+The generated path **does** now cover (no fallback needed): `supportedModes`/`IntentModes`, rich/conditional `ParameterSummary`, typed `AppIntentError` categories, `IndexedEntity` Spotlight indexing, `URLRepresentable*` deep links, `UniqueAppEntity`, pre-execution `requestConfirmation`, `IntentFile` file-input parameters, and `DynamicOptionsProvider` dynamic string options.
 
 See `plan.md` ("Audit: C#-first App Intents vs Apple documentation (2024–2026)") in the session/research notes for the full feature matrix and the phased gap roadmap (G1 declarative quick wins → G2 bridge interaction/lifecycle → G3 assistant schemas → G4 architectural/UI).
 

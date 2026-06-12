@@ -26,7 +26,8 @@ public sealed class CreateGeneratedTaskIntent : IAppIntentHandler<CreateGenerate
         [property: IntentParameter("Title")] string Title,
         [property: IntentParameter("Estimated Minutes", IsOptional = true)] int? EstimatedMinutes,
         [property: IntentParameter("Priority", IsOptional = true)] TaskPriorityLevel? Priority,
-        [property: IntentParameter("Category", IsOptional = true)] TaskCategoryType? Category);
+        [property: IntentParameter("Category", IsOptional = true)] TaskCategoryType? Category,
+        [property: IntentParameter("Tag", OptionsProvider = "taskTags")] string Tag);
 
     public Task<AppIntentResponse<AppEntityReference<TaskItem>>> HandleAsync(Request request, CancellationToken cancellationToken)
     {
@@ -37,12 +38,14 @@ public sealed class CreateGeneratedTaskIntent : IAppIntentHandler<CreateGenerate
             return Task.FromResult(AppIntentResponse<AppEntityReference<TaskItem>>.Failed("A task title is required."));
         }
 
+        var tagSuffix = string.IsNullOrWhiteSpace(request.Tag) ? "" : $" [{request.Tag}]";
+
         var task = taskService.Create(
             request.Title.Trim(),
             request.Priority ?? TaskPriorityLevel.Medium,
             request.Category ?? TaskCategoryType.Personal,
             estimatedMinutes: request.EstimatedMinutes,
-            notes: "Created by the generated MAUI App Intents bridge.");
+            notes: $"Created by the generated MAUI App Intents bridge.{tagSuffix}");
 
         return Task.FromResult(AppIntentResponse<AppEntityReference<TaskItem>>.Succeeded(
             ToReference(task),

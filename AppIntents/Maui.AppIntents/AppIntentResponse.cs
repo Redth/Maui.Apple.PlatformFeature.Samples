@@ -166,6 +166,44 @@ public sealed class AppIntentEntityQueryResponse
     public IList<AppIntentEntityValue> Entities { get; set; } = new List<AppIntentEntityValue>();
 }
 
+/// <summary>
+/// A single selectable option supplied by an <see cref="IAppIntentOptionsProvider"/> for a
+/// dynamic (non-entity) string parameter.
+/// </summary>
+public sealed class AppIntentOption
+{
+    public AppIntentOption()
+    {
+    }
+
+    public AppIntentOption(string value, string? display = null)
+    {
+        Value = value;
+        Display = display;
+    }
+
+    /// <summary>
+    /// The value bound into the intent parameter when this option is chosen.
+    /// </summary>
+    public string Value { get; set; } = "";
+
+    /// <summary>
+    /// The user-facing label. Defaults to <see cref="Value"/> when null.
+    /// </summary>
+    public string? Display { get; set; }
+}
+
+/// <summary>
+/// Supplies the dynamic list of options for a non-entity string parameter, surfaced through a
+/// generated Swift <c>DynamicOptionsProvider</c>. Register the implementing type in DI and link it
+/// to a parameter with <c>[IntentParameter("…", OptionsProvider = "&lt;identifier&gt;")]</c> where the
+/// identifier matches the type's <c>[AppIntentOptionsProvider("&lt;identifier&gt;")]</c>.
+/// </summary>
+public interface IAppIntentOptionsProvider
+{
+    Task<IReadOnlyList<AppIntentOption>> GetOptionsAsync(CancellationToken cancellationToken);
+}
+
 public interface IAppEntityQueryHandler<TEntity>
 {
     Task<IReadOnlyList<TEntity>> GetEntitiesAsync(IReadOnlyList<string> identifiers, CancellationToken cancellationToken);
