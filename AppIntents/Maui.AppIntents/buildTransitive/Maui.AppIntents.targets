@@ -1,0 +1,125 @@
+<Project>
+  <PropertyGroup>
+    <_MauiAppIntentsPlatform>$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)'))</_MauiAppIntentsPlatform>
+    <_MauiAppIntentsShouldBuild Condition="'$(MauiAppIntentsEnabled)' == 'true' and ('$(DesignTimeBuild)' != 'true') and '$(_MauiAppIntentsPlatform)' == 'ios'">true</_MauiAppIntentsShouldBuild>
+    <DefineConstants Condition="'$(_MauiAppIntentsShouldBuild)' == 'true'">$(DefineConstants);MAUI_APPINTENTS</DefineConstants>
+    <_MauiAppIntentsPackageDir>$(MauiAppIntentsBuildRoot)swiftpm/</_MauiAppIntentsPackageDir>
+    <_MauiAppIntentsOutputDir>$(MauiAppIntentsBuildRoot)native/</_MauiAppIntentsOutputDir>
+    <_MauiAppIntentsXcframework>$(_MauiAppIntentsOutputDir)xcframeworks/$(MauiAppIntentsModuleName).xcframework</_MauiAppIntentsXcframework>
+    <_MauiAppIntentsMetadataDir>$(_MauiAppIntentsOutputDir)Metadata.appintents</_MauiAppIntentsMetadataDir>
+    <_MauiAppIntentsBuildStamp>$(_MauiAppIntentsOutputDir)appintents-build.stamp</_MauiAppIntentsBuildStamp>
+    <_MauiAppIntentsGeneratedSwift>$(_MauiAppIntentsPackageDir)Sources/$(MauiAppIntentsModuleName)/Generated/AppIntents.generated.swift</_MauiAppIntentsGeneratedSwift>
+    <_MauiAppIntentsRuntimeSwift>$(_MauiAppIntentsPackageDir)Sources/$(MauiAppIntentsModuleName)/Runtime/MauiAppIntentsRuntime.swift</_MauiAppIntentsRuntimeSwift>
+    <_MauiAppIntentsValidationManifest>$(MauiAppIntentsBuildRoot)validation/MauiAppIntentValidationManifest.txt</_MauiAppIntentsValidationManifest>
+    <_MauiAppIntentsValidationStamp>$(MauiAppIntentsBuildRoot)validation/bundle-validation.stamp</_MauiAppIntentsValidationStamp>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(_MauiAppIntentsShouldBuild)' == 'true'">
+    <CompilerVisibleProperty Include="MauiAppIntentsModuleName" />
+    <Analyzer Include="$(_MauiAppIntentsPackageGeneratorAssembly)"
+              Condition="Exists('$(_MauiAppIntentsPackageGeneratorAssembly)')" />
+    <ProjectReference Include="$(_MauiAppIntentsLocalGeneratorProject)"
+                      ReferenceOutputAssembly="false"
+                      OutputItemType="Analyzer"
+                      PrivateAssets="all"
+                      Condition="!Exists('$(_MauiAppIntentsPackageGeneratorAssembly)') and Exists('$(_MauiAppIntentsLocalGeneratorProject)')" />
+    <ProjectReference Include="$(_MauiAppIntentsLocalBuildTasksProject)"
+                      ReferenceOutputAssembly="false"
+                      PrivateAssets="all"
+                      Condition="!Exists('$(_MauiAppIntentsPackageBuildTasksAssembly)') and Exists('$(_MauiAppIntentsLocalBuildTasksProject)')" />
+  </ItemGroup>
+
+  <UsingTask TaskName="Maui.AppIntents.BuildTasks.GenerateMauiAppIntentsSwiftPackage"
+             AssemblyFile="$(MauiAppIntentsBuildTasksAssembly)"
+             Condition="'$(MauiAppIntentsBuildTasksAssembly)' != ''" />
+  <UsingTask TaskName="Maui.AppIntents.BuildTasks.ValidateMauiAppIntentsBundle"
+             AssemblyFile="$(MauiAppIntentsBuildTasksAssembly)"
+             Condition="'$(MauiAppIntentsBuildTasksAssembly)' != ''" />
+
+  <Target Name="_GenerateMauiAppIntentsSwiftPackage"
+          DependsOnTargets="CoreCompile"
+          Condition="'$(_MauiAppIntentsShouldBuild)' == 'true'"
+          Inputs="@(IntermediateAssembly);$(MSBuildProjectFullPath);$(MSBuildThisFileFullPath);$(MauiAppIntentsBuildTasksAssembly)"
+          Outputs="$(_MauiAppIntentsPackageDir)Package.swift;$(_MauiAppIntentsPackageDir)build-appintents.sh;$(_MauiAppIntentsRuntimeSwift);$(_MauiAppIntentsGeneratedSwift);$(_MauiAppIntentsValidationManifest)">
+    <Error Text="Maui.AppIntents build tasks assembly was not found. Expected: '$(MauiAppIntentsBuildTasksAssembly)'."
+           Condition="'$(MauiAppIntentsBuildTasksAssembly)' == '' or !Exists('$(MauiAppIntentsBuildTasksAssembly)')" />
+    <Maui.AppIntents.BuildTasks.GenerateMauiAppIntentsSwiftPackage
+      IntermediateAssembly="@(IntermediateAssembly)"
+      OutputDirectory="$(_MauiAppIntentsPackageDir)"
+      ValidationManifestOutputFile="$(_MauiAppIntentsValidationManifest)"
+      ModuleName="$(MauiAppIntentsModuleName)"
+      MinimumOSVersion="$(MauiAppIntentsMinimumOSVersion)"
+      ArchivePlatforms="$(MauiAppIntentsArchivePlatforms)">
+      <Output TaskParameter="HasIntents" PropertyName="_MauiAppIntentsGeneratedHasIntents" />
+    </Maui.AppIntents.BuildTasks.GenerateMauiAppIntentsSwiftPackage>
+  </Target>
+
+  <Target Name="_ReadMauiAppIntentsGenerationState"
+          DependsOnTargets="_GenerateMauiAppIntentsSwiftPackage"
+          Condition="'$(_MauiAppIntentsShouldBuild)' == 'true'">
+    <ItemGroup>
+      <_MauiAppIntentsValidationEntries Remove="@(_MauiAppIntentsValidationEntries)" />
+    </ItemGroup>
+    <ReadLinesFromFile File="$(_MauiAppIntentsValidationManifest)"
+                       Condition="Exists('$(_MauiAppIntentsValidationManifest)')">
+      <Output TaskParameter="Lines" ItemName="_MauiAppIntentsValidationEntries" />
+    </ReadLinesFromFile>
+    <PropertyGroup>
+      <_MauiAppIntentsHasIntents Condition="'@(_MauiAppIntentsValidationEntries)' != ''">true</_MauiAppIntentsHasIntents>
+    </PropertyGroup>
+  </Target>
+
+  <Target Name="_BuildMauiAppIntentsNative"
+          DependsOnTargets="_ReadMauiAppIntentsGenerationState"
+          Condition="'$(_MauiAppIntentsShouldBuild)' == 'true'"
+          Inputs="$(_MauiAppIntentsPackageDir)Package.swift;$(_MauiAppIntentsPackageDir)build-appintents.sh;$(_MauiAppIntentsGeneratedSwift);$(_MauiAppIntentsRuntimeSwift)"
+          Outputs="$(_MauiAppIntentsBuildStamp);$(_MauiAppIntentsXcframework)/Info.plist;$(_MauiAppIntentsMetadataDir)/extract.actionsdata;$(_MauiAppIntentsMetadataDir)/version.json">
+    <Exec Command="&quot;$(_MauiAppIntentsPackageDir)build-appintents.sh&quot;"
+          EnvironmentVariables="CONFIGURATION=$(Configuration);BUILD_DIR=$(_MauiAppIntentsOutputDir);ARCHIVE_PLATFORMS=$(MauiAppIntentsArchivePlatforms)"
+          Condition="'$(_MauiAppIntentsHasIntents)' == 'true'" />
+  </Target>
+
+  <Target Name="_RegisterMauiAppIntentsNativeReference"
+          BeforeTargets="_ExpandNativeReferences"
+          DependsOnTargets="_BuildMauiAppIntentsNative"
+          Condition="'$(_MauiAppIntentsShouldBuild)' == 'true'">
+    <Error Text="Generated MAUI App Intents framework was not produced at '$(_MauiAppIntentsXcframework)'."
+           Condition="'$(_MauiAppIntentsHasIntents)' == 'true' and !Exists('$(_MauiAppIntentsXcframework)')" />
+    <ItemGroup Condition="'$(_MauiAppIntentsHasIntents)' == 'true'">
+      <NativeReference Include="$(_MauiAppIntentsXcframework)"
+                       Kind="Framework"
+                       ForceLoad="$(MauiAppIntentsForceLoad)"
+                       SmartLink="$(MauiAppIntentsSmartLink)"
+                       LinkWithSwiftSystemLibraries="true" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="_CopyMauiAppIntentsMetadata"
+          BeforeTargets="_CodesignAppBundle"
+          DependsOnTargets="_ReadMauiAppIntentsGenerationState;_BuildMauiAppIntentsNative"
+          Condition="'$(_MauiAppIntentsShouldBuild)' == 'true'"
+          Inputs="$(_MauiAppIntentsMetadataDir)/**/*"
+          Outputs="$(AppBundleDir)/Metadata.appintents/extract.actionsdata;$(AppBundleDir)/Metadata.appintents/version.json">
+    <ItemGroup>
+      <_MauiAppIntentsMetadata Include="$(_MauiAppIntentsMetadataDir)/**/*"
+                                Condition="'$(_MauiAppIntentsHasIntents)' == 'true'" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_MauiAppIntentsMetadata)"
+          DestinationFolder="$(AppBundleDir)/Metadata.appintents/%(RecursiveDir)"
+          Condition="'$(_MauiAppIntentsHasIntents)' == 'true' and '@(_MauiAppIntentsMetadata)' != ''" />
+  </Target>
+
+  <Target Name="_ValidateMauiAppIntentsBundle"
+          BeforeTargets="_CodesignAppBundle"
+          DependsOnTargets="_ReadMauiAppIntentsGenerationState;_CopyDirectoriesToBundle;_CopyMauiAppIntentsMetadata"
+          Condition="'$(_MauiAppIntentsShouldBuild)' == 'true' and '$(MauiAppIntentsValidateBundle)' == 'true'"
+          Inputs="$(_MauiAppIntentsValidationManifest);$(AppBundleDir)/Metadata.appintents/extract.actionsdata;$(AppBundleDir)/Metadata.appintents/version.json;$(AppBundleDir)/Frameworks/$(MauiAppIntentsModuleName).framework/Info.plist;$(MauiAppIntentsBuildTasksAssembly)"
+          Outputs="$(_MauiAppIntentsValidationStamp)">
+    <Maui.AppIntents.BuildTasks.ValidateMauiAppIntentsBundle
+      AppBundleDir="$(AppBundleDir)"
+      ModuleName="$(MauiAppIntentsModuleName)"
+      ValidationManifest="$(_MauiAppIntentsValidationManifest)"
+      StampFile="$(_MauiAppIntentsValidationStamp)"
+      Condition="'$(_MauiAppIntentsHasIntents)' == 'true'" />
+  </Target>
+</Project>

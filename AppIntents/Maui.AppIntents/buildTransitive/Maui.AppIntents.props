@@ -1,0 +1,24 @@
+<Project>
+  <PropertyGroup>
+    <MauiAppIntentsEnabled Condition="'$(MauiAppIntentsEnabled)' == ''">false</MauiAppIntentsEnabled>
+    <MauiAppIntentsArchivePlatforms Condition="'$(MauiAppIntentsArchivePlatforms)' == '' and $([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('iossimulator'))">Simulator</MauiAppIntentsArchivePlatforms>
+    <MauiAppIntentsArchivePlatforms Condition="'$(MauiAppIntentsArchivePlatforms)' == '' and $([System.String]::Copy('$(RuntimeIdentifier)').StartsWith('ios-'))">Device</MauiAppIntentsArchivePlatforms>
+    <MauiAppIntentsArchivePlatforms Condition="'$(MauiAppIntentsArchivePlatforms)' == ''">Both</MauiAppIntentsArchivePlatforms>
+    <_MauiAppIntentsDefaultModuleName>$([System.Text.RegularExpressions.Regex]::Replace('$(MSBuildProjectName)AppIntents', '[^A-Za-z0-9_]', ''))</_MauiAppIntentsDefaultModuleName>
+    <MauiAppIntentsModuleName Condition="'$(MauiAppIntentsModuleName)' == ''">$(_MauiAppIntentsDefaultModuleName)</MauiAppIntentsModuleName>
+    <MauiAppIntentsMinimumOSVersion Condition="'$(MauiAppIntentsMinimumOSVersion)' == ''">17.0</MauiAppIntentsMinimumOSVersion>
+    <_MauiAppIntentsRuntimeIdentifierSegment Condition="'$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)/</_MauiAppIntentsRuntimeIdentifierSegment>
+    <MauiAppIntentsBuildRoot Condition="'$(MauiAppIntentsBuildRoot)' == ''">$(BaseIntermediateOutputPath)$(Configuration)/$(TargetFramework)/$(_MauiAppIntentsRuntimeIdentifierSegment)maui-appintents/</MauiAppIntentsBuildRoot>
+    <MauiAppIntentsForceLoad Condition="'$(MauiAppIntentsForceLoad)' == ''">true</MauiAppIntentsForceLoad>
+    <MauiAppIntentsSmartLink Condition="'$(MauiAppIntentsSmartLink)' == ''">false</MauiAppIntentsSmartLink>
+    <MauiAppIntentsValidateBundle Condition="'$(MauiAppIntentsValidateBundle)' == ''">true</MauiAppIntentsValidateBundle>
+    <_MauiAppIntentsPackageGeneratorAssembly>$(MSBuildThisFileDirectory)..\analyzers\dotnet\cs\Maui.AppIntents.Generator.dll</_MauiAppIntentsPackageGeneratorAssembly>
+    <_MauiAppIntentsPackageBuildTasksAssembly>$(MSBuildThisFileDirectory)..\tasks\Maui.AppIntents.BuildTasks.dll</_MauiAppIntentsPackageBuildTasksAssembly>
+    <_MauiAppIntentsLocalRoot>$(MSBuildThisFileDirectory)..\..\</_MauiAppIntentsLocalRoot>
+    <_MauiAppIntentsLocalGeneratorProject>$(_MauiAppIntentsLocalRoot)Maui.AppIntents.Generator\Maui.AppIntents.Generator.csproj</_MauiAppIntentsLocalGeneratorProject>
+    <_MauiAppIntentsLocalBuildTasksProject>$(_MauiAppIntentsLocalRoot)Maui.AppIntents.BuildTasks\Maui.AppIntents.BuildTasks.csproj</_MauiAppIntentsLocalBuildTasksProject>
+    <MauiAppIntentsBuildTasksAssembly Condition="'$(MauiAppIntentsBuildTasksAssembly)' == '' and Exists('$(_MauiAppIntentsPackageBuildTasksAssembly)')">$(_MauiAppIntentsPackageBuildTasksAssembly)</MauiAppIntentsBuildTasksAssembly>
+    <MauiAppIntentsBuildTasksAssembly Condition="'$(MauiAppIntentsBuildTasksAssembly)' == '' and Exists('$(_MauiAppIntentsLocalBuildTasksProject)')">$(_MauiAppIntentsLocalRoot)Maui.AppIntents.BuildTasks\bin\$(Configuration)\netstandard2.0\Maui.AppIntents.BuildTasks.dll</MauiAppIntentsBuildTasksAssembly>
+  </PropertyGroup>
+
+</Project>
